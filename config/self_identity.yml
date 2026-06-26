@@ -1,0 +1,59 @@
+# Who "I" am — used to detect self-transfers (money moving between the
+# account holder's OWN accounts / instruments), so they are NOT counted as
+# real income or expense.
+#
+# A self-transfer is when the counterparty is the account holder themselves:
+#   - HDFC <-> ICICI <-> PNB <-> SBI round-trips
+#   - loading own Paytm/UPI handle linked to own phone number
+#   - moving money into a Fixed Deposit
+#   - paying one's own credit-card bill
+#
+# IMPORTANT: own NAME alone is deliberately NOT a self signal, because employer
+# credits carry the name too (e.g. "PRIMUS GLOBAL -FARHAN HAI KHAN" is salary,
+# not a self-transfer). Self detection relies on own UPI handles, own phone
+# number in a VPA, own account numbers, and explicit FD/credit-card markers.
+#
+# Matching is case-insensitive substring/regex. Edit freely.
+
+account_holder: Farhan Hai Khan
+
+# Own phone number — any UPI VPA containing it is the account holder's own.
+own_phone_numbers:
+  - "7464027555"
+
+# Own UPI handles / VPAs. Use stems (no PSP suffix) so truncated narrations
+# like "fhk.main@ptaxi" (cut from @ptaxis) still match. The phone number
+# "7464027555" below already catches every 7464027555@* handle as a substring.
+own_upi_handles:
+  - "fhk.main@"
+  - "fhk.main"
+
+# Own bank account numbers (full or distinctive fragments).
+own_account_numbers:
+  - "048901510152"   # ICICI savings
+  - "9965"           # HDFC account (last 4 of statement file)
+
+# Own banks (used together with own-name cheque clearing like "CLG/.../SBI").
+own_banks:
+  - ICICI
+  - HDFC
+  - PNB
+  - "Punjab National"
+  - SBI
+  - "State Bank"
+
+# Explicit self-transfer narration markers (regex, case-insensitive).
+# Kept specific on purpose: FD *interest* and other lookalikes must stay income.
+self_transfer_patterns:
+  - "trf to fd"                  # transfer to fixed deposit (creation)
+  - "trf from fd"                # fixed deposit maturity back to account
+  - "\\bfd no\\.?"               # "FD no. 048913..." references
+  - "cc billpay/self"            # own credit-card autopay (ICICI)
+  - "billpay/self"
+  - "ib billpay dr"              # own credit-card bill (HDFC NetBanking)
+  - "clg/.*farhan hai khan"      # own cheque clearing across own banks
+
+# 048913... is the FD-account series tied to the ICICI savings account.
+own_account_prefixes:
+  - "0489130"
+  - "0489135"

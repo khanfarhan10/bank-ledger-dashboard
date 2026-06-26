@@ -8,17 +8,41 @@
 # to any particular name. Classification is rule-based and transparent.
 
 categories:
+  # people
   - benazir_payments
   - nazrana_payments
   - benazir_repayment
-  - large_expenses
-  - loan_or_emi
+  - family_transfer
+  # income (real money in)
+  - salary_or_income
+  - it_refund
+  - interest_income
+  - cashback_reward
+  # own-money movement (not income / not expense)
+  - self_transfer
+  - refund_reversal
+  - investment
+  - investment_redemption
+  # obligations
   - insurance
+  - loan_or_emi
+  # everyday spend
+  - food
+  - groceries
+  - shopping
+  - transport
+  - fuel
+  - utilities
+  - entertainment
+  - education
+  - medical
+  - cash_withdrawal
+  - bank_charges
+  - large_expenses
   - personal_expense
   - family_expense
-  - cash_withdrawal
   - transfer
-  - salary_or_income
+  # fallback
   - unknown
   - review_later
 

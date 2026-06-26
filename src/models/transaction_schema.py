@@ -52,6 +52,7 @@ SCHEMA_COLUMNS: list[str] = [
     # --- classification ---
     "category",
     "subcategory",
+    "tags",                    # comma-joined multi-label tags (food, upi, 80c...)
     "classification_status",   # auto | manual | unclassified
     "classification_reason",
     "confidence",              # simple 0..1 hint, never a guarantee
@@ -59,6 +60,10 @@ SCHEMA_COLUMNS: list[str] = [
     "is_benazir_related",
     "is_nazrana_related",
     "is_large_payment",
+    "is_self_transfer",        # money between the user's own accounts (excluded from totals)
+    "is_income",               # real income (salary, refund, interest, ...)
+    "is_investment",           # money invested/saved (not an expense)
+    "is_duplicate",            # exact duplicate from overlapping exports (excluded)
     "is_manual_entry",
     "is_linked_entry",
     # --- manual review (merged in from the decision store) ---

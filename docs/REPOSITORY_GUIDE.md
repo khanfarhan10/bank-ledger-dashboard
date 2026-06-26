@@ -8,9 +8,16 @@ A tour of how the code is organised and how data flows through it.
 
 ```
 bank-ledger-dashboard/
-├── app.py                     # Streamlit UI: data loading + 6 pages + router
+├── run_web.py                 # launch the FastAPI web app (primary UI)
+├── app.py                     # legacy Streamlit UI (still works)
 ├── requirements.txt
 ├── README.md
+│
+├── web/                       # FastAPI + Tabulator.js dashboard
+│   ├── server.py              # JSON API endpoints + serves the page
+│   ├── state.py               # in-process cache of the pipeline + store
+│   ├── templates/index.html   # single-page shell (tabs)
+│   └── static/                # app.js, styles.css, vendor/tabulator.*
 │
 ├── all_bank_statements/       # READ-ONLY source statements (never written to)
 │   ├── ICICI/  OpTransactionHistory*.xls
@@ -19,6 +26,7 @@ bank-ledger-dashboard/
 ├── config/                    # editable configuration
 │   ├── aliases.yml            # people -> aliases for name matching
 │   ├── categories.yml         # category list + review statuses
+│   ├── self_identity.yml      # own accounts/handles -> self-transfer detection
 │   └── thresholds.yml         # large-payment threshold
 │
 ├── data/                      # everything the app generates (gitignored)
@@ -44,9 +52,12 @@ bank-ledger-dashboard/
     │   └── generic_pdf_parser.py   # documented placeholder
     ├── services/
     │   ├── file_discovery.py       # find + checksum source files
-    │   ├── extraction_service.py   # parser registry; run parsers; per-file reports
-    │   ├── normalization_service.py# amount/direction, txn id, name detection
-    │   ├── classification_service.py# transparent rule-based auto-classification
+    │   ├── extraction_service.py   # parser registry; run parsers; reports; gap detection
+    │   ├── normalization_service.py# amount/direction, txn id, name detection, dedup
+    │   ├── classification_rules.py # the regex rule sets (categories + multi-tags)
+    │   ├── classification_service.py# applies rules + self-transfer + multi-label tags
+    │   ├── self_transfer.py        # own-account / self-transfer detection
+    │   ├── analytics.py            # corrected totals, income, investments, counterparties
     │   ├── decision_store.py       # SQLite store + decision/entry overlay helpers
     │   ├── export_service.py       # CSV/XLSX bytes + saved exports
     │   └── pipeline.py             # orchestration tying the steps together

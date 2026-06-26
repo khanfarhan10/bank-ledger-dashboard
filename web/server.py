@@ -1,0 +1,290 @@
+"""FastAPI server: JSON API + single-page Tabulator dashboard.
+
+Run with:  python run_web.py     (or: uvicorn web.server:app --reload)
+
+All processing is local. The frontend (templates/index.html + static/) talks to
+the /api/* endpoints below, which are thin wrappers over the service layer and
+the DecisionStore. Source statements under all_bank_statements/ are never
+written to — only data/cache/decisions.sqlite changes.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from src.services import analytics
+from web.state import STATE
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+TEMPLATES_DIR = BASE_DIR / "templates"
+
+app = FastAPI(title="Bank Ledger Dashboard", docs_url="/api/docs")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+# --- helpers ----------------------------------------------------------------
+
+# Columns surfaced to the interactive grid (lean but complete enough to act on).
+GRID_COLUMNS = [
+    "transaction_id", "transaction_date", "source_bank", "description",
+    "amount", "direction", "category", "tags", "detected_names",
+    "manual_review_status", "manual_comment", "manual_flags",
+    "is_self_transfer", "is_income", "is_investment", "is_large_payment",
+    "is_duplicate", "is_manual_entry", "raw_description",
+]
+
+
+def _clean(records: list[dict]) -> list[dict]:
+    """Make DataFrame records JSON-safe (NaN/NA -> None, numpy -> python)."""
+    out = []
+    for r in records:
+        row = {}
+        for k, v in r.items():
+            if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+                row[k] = None
+            elif v is pd.NA or v is None:
+                row[k] = None
+            elif isinstance(v, (np.bool_,)):
+                row[k] = bool(v)
+            elif isinstance(v, (np.integer,)):
+                row[k] = int(v)
+            elif isinstance(v, (np.floating,)):
+                row[k] = float(v)
+            else:
+                try:
+                    if pd.isna(v):
+                        row[k] = None
+                        continue
+                except (TypeError, ValueError):
+                    pass
+                row[k] = v
+        out.append(row)
+    return out
+
+
+def _grid_rows(df: pd.DataFrame) -> list[dict]:
+    if df is None or df.empty:
+        return []
+    have = [c for c in GRID_COLUMNS if c in df.columns]
+    return _clean(df[have].to_dict(orient="records"))
+
+
+# --- page -------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    return (TEMPLATES_DIR / "index.html").read_text(encoding="utf-8")
+
+
+# --- meta -------------------------------------------------------------------
+
+@app.get("/api/meta")
+def meta() -> dict:
+    aliases = STATE.aliases
+    persons = [
+        {"key": k, "label": (v or {}).get("display_name", k)}
+        for k, v in aliases.items()
+    ]
+    return {
+        "categories": STATE.categories,
+        "review_statuses": STATE.review_statuses,
+        "persons": persons,
+        "threshold": STATE.threshold,
+    }
+
+
+# --- overview ---------------------------------------------------------------
+
+@app.get("/api/overview")
+def overview() -> dict:
+    ledger = STATE.ledger()
+    ext = STATE.extraction()
+    ov = analytics.overview(ledger)
+    ov["benazir"] = analytics.person_totals(ledger, "is_benazir_related")
+    ov["nazrana"] = analytics.person_totals(ledger, "is_nazrana_related")
+    ov["categories"] = analytics.category_breakdown(ledger)
+    ov["overall_gaps"] = ext.get("overall_gaps", [])
+    ov["files"] = len(ext.get("reports", []))
+    return ov
+
+
+# --- ledger -----------------------------------------------------------------
+
+@app.get("/api/ledger")
+def ledger() -> dict:
+    df = STATE.ledger()
+    return {"rows": _grid_rows(df), "count": int(len(df)) if df is not None else 0}
+
+
+@app.get("/api/extraction")
+def extraction() -> dict:
+    ext = STATE.extraction()
+    return {
+        "reports": _clean(ext.get("reports", [])),
+        "overall_gaps": ext.get("overall_gaps", []),
+    }
+
+
+# --- persons ----------------------------------------------------------------
+
+@app.get("/api/persons")
+def persons() -> dict:
+    df = STATE.ledger()
+    if df is None or df.empty:
+        return {"rows": [], "benazir": {}, "nazrana": {}, "counterparties": []}
+
+    ben = df["is_benazir_related"].fillna(False).astype(bool)
+    naz = df["is_nazrana_related"].fillna(False).astype(bool)
+    matched = df[ben | naz]
+    return {
+        "rows": _grid_rows(matched),
+        "benazir": analytics.person_totals(df, "is_benazir_related"),
+        "nazrana": analytics.person_totals(df, "is_nazrana_related"),
+        "counterparties": analytics.top_counterparties(df, 40),
+    }
+
+
+# --- investments / income ---------------------------------------------------
+
+@app.get("/api/investments")
+def investments() -> dict:
+    return analytics.investment_breakdown(STATE.ledger())
+
+
+@app.get("/api/income")
+def income() -> dict:
+    return analytics.income_breakdown(STATE.ledger())
+
+
+# --- large ------------------------------------------------------------------
+
+@app.get("/api/large")
+def large(threshold: float | None = None) -> dict:
+    df = STATE.ledger()
+    if df is None or df.empty:
+        return {"rows": [], "threshold": STATE.threshold}
+    thr = STATE.threshold if threshold is None else float(threshold)
+    amt = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    sub = df[amt >= thr].sort_values("amount", ascending=False)
+    return {"rows": _grid_rows(sub), "threshold": thr, "count": int(len(sub))}
+
+
+# --- manual entries ---------------------------------------------------------
+
+class ManualEntryIn(BaseModel):
+    entry_date: str
+    person: str = ""
+    amount: float = 0.0
+    direction: str = "PAID_OUT"
+    category: str = ""
+    description: str = ""
+    reason: str = ""
+    evidence_note: str = ""
+
+
+@app.get("/api/manual-entries")
+def manual_entries() -> dict:
+    df = STATE.store.get_manual_entries_df()
+    return {"rows": _clean(df.to_dict(orient="records")) if not df.empty else []}
+
+
+@app.post("/api/manual-entries")
+def add_manual_entry(entry: ManualEntryIn) -> dict:
+    eid = STATE.store.add_manual_entry(
+        entry_date=entry.entry_date, person=entry.person, amount=entry.amount,
+        direction=entry.direction, category=entry.category,
+        description=entry.description, reason=entry.reason,
+        evidence_note=entry.evidence_note,
+    )
+    STATE.invalidate_decisions()
+    return {"ok": True, "manual_entry_id": eid}
+
+
+@app.delete("/api/manual-entries/{entry_id}")
+def delete_manual_entry(entry_id: str) -> dict:
+    STATE.store.delete_manual_entry(entry_id, reason="Deleted from web UI")
+    STATE.invalidate_decisions()
+    return {"ok": True}
+
+
+class LinkIn(BaseModel):
+    manual_entry_id: str
+    transaction_id: str
+
+
+@app.post("/api/manual-entries/link")
+def link_manual_entry(link: LinkIn) -> dict:
+    STATE.store.add_link(link.manual_entry_id, link.transaction_id)
+    STATE.invalidate_decisions()
+    return {"ok": True}
+
+
+# --- decisions (the heart of the interactive grid) --------------------------
+
+class DecisionIn(BaseModel):
+    transaction_id: str
+    category: str | None = None
+    manual_review_status: str | None = None
+    manual_person: str | None = None
+    manual_comment: str | None = None
+    manual_flags: str | None = None
+    reason: str | None = "Edited via web dashboard"
+
+
+@app.post("/api/decision")
+def save_decision(dec: DecisionIn) -> dict:
+    if not dec.transaction_id:
+        raise HTTPException(status_code=400, detail="transaction_id required")
+    STATE.store.save_decision(
+        dec.transaction_id,
+        category=dec.category,
+        manual_review_status=dec.manual_review_status,
+        manual_person=dec.manual_person,
+        manual_comment=dec.manual_comment,
+        manual_flags=dec.manual_flags,
+        reason=dec.reason,
+    )
+    STATE.invalidate_decisions()
+    return {"ok": True}
+
+
+class ResetIn(BaseModel):
+    transaction_id: str
+
+
+@app.post("/api/decision/reset")
+def reset_decision(body: ResetIn) -> dict:
+    STATE.store.reset_decision(body.transaction_id, reason="Reset via web dashboard")
+    STATE.invalidate_decisions()
+    return {"ok": True}
+
+
+# --- threshold / refresh ----------------------------------------------------
+
+class ThresholdIn(BaseModel):
+    value: float
+
+
+@app.post("/api/threshold")
+def set_threshold(body: ThresholdIn) -> dict:
+    STATE.set_threshold(body.value)
+    return {"ok": True, "threshold": STATE.threshold}
+
+
+@app.post("/api/refresh")
+def refresh() -> dict:
+    STATE.refresh()
+    return {"ok": True}
+
+
+@app.get("/api/health")
+def health() -> JSONResponse:
+    return JSONResponse({"ok": True})

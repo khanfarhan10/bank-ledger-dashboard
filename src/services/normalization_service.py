@@ -101,6 +101,25 @@ def _normalize_row(row: pd.Series, aliases: dict, ts: str) -> dict:
     }
 
 
+def flag_duplicates(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark exact duplicate rows (is_duplicate=True on all but the first).
+
+    Overlapping bank exports (e.g. ICICI year-boundary ranges) can list the
+    same transaction in two files. A row is considered a true duplicate only
+    when bank, date, narration, debit, credit AND running balance all match —
+    identical running balance means the same ledger position, which cannot
+    legitimately occur twice. The first occurrence is kept; the rest are
+    flagged so totals can exclude them.
+    """
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    key = ["source_bank", "transaction_date", "raw_description", "debit", "credit", "balance"]
+    have = [k for k in key if k in out.columns]
+    out["is_duplicate"] = out.duplicated(subset=have, keep="first")
+    return out
+
+
 def _amount_and_direction(debit: float, credit: float) -> tuple[float, str]:
     """Derive absolute amount and direction from debit/credit.
 

@@ -5,17 +5,23 @@ Observed layout (binary .xls, read with xlrd):
     * Single sheet named 'OpTransactionHistory'.
     * Column 0 is always blank; real data starts at column 1.
     * A metadata block at the top (account number, date range, ...).
+      Row 4 holds the stated date range:
+        col 1 = 'Transaction Date from'  col 3 = start_date  col 5 = end_date
     * The transaction header row reads:
         S No. | Value Date | Transaction Date | Cheque Number |
         Transaction Remarks | Withdrawal Amount(INR) | Deposit Amount(INR) |
         Balance(INR)
     * Transaction rows follow, each starting with an incrementing S No.
+    * Long narrations wrap onto a continuation row: S No. and Value Date are
+      blank, col 5 holds the continuation text, amount cols are blank.
+      These must be appended to the previous row and NOT treated as end-of-data.
     * After the transactions there is a 'Legends' section explaining codes
       (rows like '20. VPS / IPS - ...'); these must NOT be treated as data.
+      The Legends section always starts with 'Legends Used' in col 1.
 
 Strategy: find the header row by looking for 'S No.' + 'Transaction Remarks',
-then read rows below it for as long as the Value Date column looks like a date.
-All amounts arrive as text and are parsed defensively.
+then read rows below it. Skip/merge continuation rows. Stop at the Legends
+header. All amounts arrive as text and are parsed defensively.
 """
 
 from __future__ import annotations
@@ -51,6 +57,7 @@ class IciciExcelParser(BaseParser):
             return self._empty_result(f"Could not open ICICI workbook: {exc}", path)
 
         sheet = book.sheet_by_index(0)
+        stated_from, stated_to = self._extract_stated_range(sheet)
         header_row = self._find_header_row(sheet)
         if header_row is None:
             return self._empty_result(
@@ -66,6 +73,8 @@ class IciciExcelParser(BaseParser):
                 "sheet_name": sheet.name,
                 "header_row_index": header_row,
                 "rows_extracted": len(df),
+                "stated_date_from": stated_from,
+                "stated_date_to": stated_to,
             },
         )
 
@@ -81,6 +90,21 @@ class IciciExcelParser(BaseParser):
     _COL_DEPOSIT = 7
     _COL_BALANCE = 8
 
+    def _extract_stated_range(self, sheet) -> tuple[str | None, str | None]:
+        """Read the 'Transaction Date from … to …' line from the metadata block.
+
+        Row 4 of ICICI exports (0-indexed) contains:
+          col 1 = 'Transaction Date from'  col 3 = start  col 4 = 'to'  col 5 = end
+        Returns ISO date strings or None if not found.
+        """
+        for r in range(min(10, sheet.nrows)):
+            label = str(sheet.cell_value(r, 1)).strip().lower()
+            if "transaction date from" in label:
+                raw_from = str(sheet.cell_value(r, 3)).strip()
+                raw_to = str(sheet.cell_value(r, 5)).strip()
+                return parse_date(raw_from), parse_date(raw_to)
+        return None, None
+
     def _find_header_row(self, sheet) -> int | None:
         """Return the index of the transaction header row, or None."""
         for r in range(min(sheet.nrows, 60)):
@@ -93,26 +117,45 @@ class IciciExcelParser(BaseParser):
         return None
 
     def _read_rows(self, sheet, header_row: int, path: Path):
-        """Read transaction rows below the header until data clearly ends."""
+        """Read transaction rows below the header until data clearly ends.
+
+        ICICI wraps long narrations onto a continuation row: S No. and Value
+        Date are blank, col 5 holds the continuation text, amount cols are
+        blank. These must be merged into the previous row — NOT treated as
+        end-of-data. Only the 'Legends Used' section header truly ends the
+        transaction list.
+        """
         rows = []
         warnings = []
-        ts = datetime.now(timezone.utc).isoformat()
-        skipped = 0
+        continuations = 0
 
         for r in range(header_row + 1, sheet.nrows):
             value_date_cell = sheet.cell_value(r, self._COL_VALUE_DATE)
 
-            # Stop conditions: the Legends section and trailing notes have no
-            # date in the Value Date column. A blank S No. + no date means we
-            # are past the transaction list.
             if not looks_like_date(value_date_cell):
-                # Tolerate the occasional blank row inside the table, but bail
-                # out once we hit the non-date legends/footer region.
-                sno = str(sheet.cell_value(r, self._COL_SNO)).strip()
-                if sno == "" or not sno.split(".")[0].isdigit():
+                sno_raw = str(sheet.cell_value(r, self._COL_SNO)).strip()
+
+                # True end-of-data: Legends section header in col 1.
+                if "legends" in sno_raw.lower():
                     break
-                skipped += 1
-                continue
+
+                # Continuation row: S No. empty, no date, remark text present,
+                # amount columns blank. Append narration to previous row.
+                remarks_cont = str(sheet.cell_value(r, self._COL_REMARKS)).strip()
+                wd_cell = str(sheet.cell_value(r, self._COL_WITHDRAWAL)).strip()
+                dep_cell = str(sheet.cell_value(r, self._COL_DEPOSIT)).strip()
+
+                if sno_raw == "" and remarks_cont and not wd_cell and not dep_cell:
+                    if rows:
+                        rows[-1]["raw_description"] += " " + remarks_cont
+                        rows[-1]["description"] = _clean_text(
+                            rows[-1]["raw_description"]
+                        )
+                    continuations += 1
+                    continue
+
+                # Any other non-date, non-continuation row ends the table.
+                break
 
             remarks = str(sheet.cell_value(r, self._COL_REMARKS)).strip()
             rows.append(
@@ -140,8 +183,10 @@ class IciciExcelParser(BaseParser):
                 }
             )
 
-        if skipped:
-            warnings.append(f"Skipped {skipped} row(s) without a valid date.")
+        if continuations:
+            warnings.append(
+                f"Merged {continuations} narration continuation row(s) into their parent transactions."
+            )
         if not rows:
             warnings.append("No transaction rows were extracted.")
         return rows, warnings

@@ -59,3 +59,22 @@ def load_threshold(config_dir: Path | str = CONFIG_DIR, default: float = 3000.0)
         return float(data.get("large_payment_threshold", default))
     except (TypeError, ValueError):
         return default
+
+
+def load_self_identity(config_dir: Path | str = CONFIG_DIR) -> dict:
+    """Return the account-holder self-identity config (self_identity.yml).
+
+    Used to detect self-transfers (money moving between the user's own
+    accounts/instruments) so they are excluded from income/expense totals.
+    Returns sensible empty lists if the file is missing.
+    """
+    data = load_yaml(Path(config_dir) / "self_identity.yml")
+    return {
+        "account_holder": data.get("account_holder", ""),
+        "own_phone_numbers": list(data.get("own_phone_numbers", []) or []),
+        "own_upi_handles": list(data.get("own_upi_handles", []) or []),
+        "own_account_numbers": list(data.get("own_account_numbers", []) or []),
+        "own_account_prefixes": list(data.get("own_account_prefixes", []) or []),
+        "own_banks": list(data.get("own_banks", []) or []),
+        "self_transfer_patterns": list(data.get("self_transfer_patterns", []) or []),
+    }

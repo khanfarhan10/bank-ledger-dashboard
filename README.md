@@ -73,12 +73,28 @@ pip install -r requirements.txt
 
 ## How to run
 
+The primary UI is a **FastAPI + Tabulator** web app — a real interactive
+dashboard with right-click row actions and inline editing:
+
 ```bash
-streamlit run app.py
+python run_web.py            # then open http://127.0.0.1:8000
 ```
 
-Your browser opens at `http://localhost:8501`. All processing is local — no
-cloud upload, no external API calls, no telemetry.
+A legacy Streamlit UI is still available (`streamlit run app.py`) but the web app
+is the recommended interface.
+
+All processing is local — no cloud upload, no external API calls, no telemetry.
+Tabulator.js is vendored under `web/static/vendor/`, so the app runs fully
+offline (nothing is fetched from a CDN at runtime).
+
+### Working in the dashboard
+
+- **Right-click any transaction row** for a context menu: reclassify, mark as a
+  self-transfer, mark as related to Benazir / Nazrana, set a review status, add a
+  note or flags, or reset to the automatic classification.
+- **Double-click** a category, review-status, or note cell to edit it inline.
+- Every edit is saved immediately to `data/cache/decisions.sqlite` and survives
+  re-reads and restarts.
 
 ## Where to place bank statements
 
@@ -95,22 +111,47 @@ it cannot read (showing the problem in the UI rather than crashing).
 
 ---
 
-## The pages
+## The money model (important)
 
-1. **Unified Extraction View** — exactly what each parser pulled from each file,
-   with a per-file parse report (rows, warnings, errors, checksum). Verify
-   extraction here.
-2. **Combined Ledger** — the master transaction history across all sources, with
-   filters (bank, date, direction, search), totals, and an inline editor.
-3. **Name / Person Review** — transactions matching Benazir / Nazrana aliases,
-   net paid/received, per-person review. You can also mark *any* transaction as
-   related even when no alias matched.
-4. **Large Payments** — everything at/above a dynamic threshold (default
-   ₹3,000), editable live and saved.
-5. **Classification Summary** — totals overall, per-person, and per-category,
-   plus focused exports.
-6. **Manual Entries** — record payments that don't appear with the person's name
-   and link them to one or more bank transactions.
+Headline totals reflect **real money in and out**, not internal shuffling:
+
+- **Self-transfers are excluded.** Money moving between your own accounts/
+  instruments (ICICI ↔ HDFC ↔ PNB ↔ SBI, loading your own UPI handle, moving to
+  a Fixed Deposit, paying your own credit-card bill) is detected via
+  `config/self_identity.yml` and left out of income/expense. Without this, the
+  same rupee gets counted twice (a debit in one statement, a credit in another).
+- **Exact duplicates are excluded.** Overlapping statement exports can list the
+  same transaction twice; identical rows (including running balance) are flagged.
+- **Income** = salary (KoiReader, Primus Global), tax refunds, interest, etc.
+- **Investments** (Groww, Zerodha, SGB, PPF, NPS, stocks, FDs) are shown
+  separately as *savings*, not counted as expense.
+- **Real expense** = real money out that isn't an investment.
+
+Classification is transparent regex (see `src/services/classification_rules.py`).
+Each transaction gets one **primary category** plus any number of descriptive
+**tags** (e.g. a Kotak premium → category `insurance`, tags `insurance,
+tax_saving_80c`). Nothing about "owed" is ever inferred — that's manual only.
+
+## The pages (web app)
+
+1. **Overview** — corrected headline metrics (real income, real expense,
+   invested, net), self-transfers/duplicates excluded, category breakdown, and
+   data-coverage status (missing months).
+2. **Ledger** — the master transaction grid: filter by bank / direction /
+   category / search, hide self-transfers, right-click for actions, edit inline.
+3. **People** — Benazir / Nazrana net totals and matched transactions, plus a
+   **Top counterparties** table so you can spot who recurs and tag them.
+4. **Investments** — by instrument (Groww, Zerodha, SGB, PPF, NPS, …) and an 80C
+   tax-saving subtotal.
+5. **Income** — who paid you and how much, over the whole period.
+6. **Large** — everything at/above a live, savable threshold.
+7. **Manual** — record payments that don't show the person's name and link them
+   to bank transactions.
+
+> **Identifying counterparties:** the People page surfaces big recurring
+> counterparties inferred from narrations (e.g. `9471351129@icic`,
+> `Husna Ara Bano`). They are *not* assumed to relate to anyone — right-click
+> them in the Ledger to mark who they are.
 
 ---
 

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bank Ledger Dashboard</title>
+  <link rel="stylesheet" href="/static/vendor/tabulator_midnight.min.css" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">₹</span>
+      <div>
+        <h1>Bank Ledger Dashboard</h1>
+        <p class="sub">Local financial control center</p>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-page="overview">Overview</button>
+      <button class="tab" data-page="ledger">Ledger</button>
+      <button class="tab" data-page="persons">People</button>
+      <button class="tab" data-page="investments">Investments</button>
+      <button class="tab" data-page="income">Income</button>
+      <button class="tab" data-page="large">Large</button>
+      <button class="tab" data-page="manual">Manual</button>
+    </nav>
+    <div class="actions">
+      <button id="refreshBtn" class="btn ghost" title="Re-read source statements">⟳ Re-read</button>
+    </div>
+  </header>
+
+  <main id="content">
+    <!-- Overview -->
+    <section class="page active" id="page-overview">
+      <div class="cards" id="ovCards"></div>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>Where the money goes <span class="muted">(real money, self-transfers excluded)</span></h3>
+          <div id="ovCategories" class="bars"></div>
+        </div>
+        <div class="panel">
+          <h3>People</h3>
+          <div id="ovPeople"></div>
+          <h3 style="margin-top:18px">Data coverage</h3>
+          <div id="ovCoverage"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ledger -->
+    <section class="page" id="page-ledger">
+      <div class="toolbar">
+        <input id="ledgerSearch" class="input" placeholder="Search description…" />
+        <select id="ledgerBank" class="input"></select>
+        <select id="ledgerDir" class="input">
+          <option value="">All directions</option>
+          <option value="RECEIVED">Received</option>
+          <option value="PAID_OUT">Paid out</option>
+          <option value="UNKNOWN">Unknown</option>
+        </select>
+        <select id="ledgerCat" class="input"></select>
+        <label class="chk"><input type="checkbox" id="ledgerHideSelf" checked /> Hide self-transfers</label>
+        <span class="hint">Right-click a row for actions • double-click category / note to edit inline</span>
+      </div>
+      <div id="ledgerGrid" class="grid-host"></div>
+    </section>
+
+    <!-- People -->
+    <section class="page" id="page-persons">
+      <div class="cards" id="personCards"></div>
+      <div class="panel">
+        <h3>Matched transactions <span class="muted">(Benazir / Nazrana + manually marked)</span></h3>
+        <div id="personsGrid" class="grid-host"></div>
+      </div>
+      <div class="panel">
+        <h3>Top counterparties <span class="muted">— who you transact with most. Right-click to tag them.</span></h3>
+        <p class="hint">These are inferred from narrations. Use them to spot people who should be linked to Benazir / Nazrana or marked as family.</p>
+        <div id="counterpartiesGrid" class="grid-host short"></div>
+      </div>
+    </section>
+
+    <!-- Investments -->
+    <section class="page" id="page-investments">
+      <div class="cards" id="invCards"></div>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>By instrument</h3>
+          <div id="invByInstrument"></div>
+        </div>
+        <div class="panel">
+          <h3>Investment transactions</h3>
+          <div id="invGrid" class="grid-host short"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Income -->
+    <section class="page" id="page-income">
+      <div class="cards" id="incCards"></div>
+      <div class="grid-2">
+        <div class="panel">
+          <h3>Who paid you</h3>
+          <div id="incBySource"></div>
+        </div>
+        <div class="panel">
+          <h3>Income transactions</h3>
+          <div id="incGrid" class="grid-host short"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Large -->
+    <section class="page" id="page-large">
+      <div class="toolbar">
+        <label>Threshold (₹)
+          <input id="largeThreshold" class="input" type="number" step="500" />
+        </label>
+        <button id="largeApply" class="btn">Apply</button>
+        <button id="largeSave" class="btn ghost">Save as default</button>
+        <span id="largeCount" class="hint"></span>
+      </div>
+      <div id="largeGrid" class="grid-host"></div>
+    </section>
+
+    <!-- Manual -->
+    <section class="page" id="page-manual">
+      <div class="grid-2">
+        <div class="panel">
+          <h3>Add a manual entry</h3>
+          <p class="hint">For payments made on someone's behalf that don't show their name (e.g. an insurance premium, cash).</p>
+          <form id="manualForm" class="form">
+            <label>Date <input name="entry_date" type="date" required /></label>
+            <label>Person <input name="person" placeholder="benazir / nazrana / other" /></label>
+            <label>Amount (₹) <input name="amount" type="number" step="0.01" min="0" required /></label>
+            <label>Direction
+              <select name="direction">
+                <option value="PAID_OUT">Paid out</option>
+                <option value="RECEIVED">Received</option>
+                <option value="UNKNOWN">Unknown</option>
+              </select>
+            </label>
+            <label>Category <select name="category" id="manualCat"></select></label>
+            <label class="wide">Description <input name="description" /></label>
+            <label class="wide">Reason / context <textarea name="reason" rows="2"></textarea></label>
+            <button class="btn" type="submit">Add entry</button>
+          </form>
+        </div>
+        <div class="panel">
+          <h3>Existing manual entries</h3>
+          <div id="manualGrid" class="grid-host short"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/static/vendor/tabulator.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

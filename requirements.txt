@@ -1,11 +1,18 @@
 # Bank Ledger Dashboard — Python dependencies
 # Local-only app. No cloud, no telemetry.
 
-streamlit>=1.30,<2.0      # dashboard UI
+# --- Web dashboard (FastAPI + Tabulator.js) ---
+fastapi>=0.110,<1.0       # JSON API + page serving
+uvicorn>=0.27,<1.0        # ASGI server (python run_web.py)
+
+# --- Core data ---
 pandas>=2.0,<3.0          # tabular data handling
 openpyxl>=3.1,<4.0        # read/write modern .xlsx
 xlrd>=2.0,<3.0            # read old binary .xls (ICICI/HDFC exports)
 PyYAML>=6.0,<7.0          # config files (aliases/categories/thresholds)
+
+# --- Legacy Streamlit UI (app.py); the FastAPI app is the primary UI now ---
+streamlit>=1.30,<2.0
 
 # --- Optional, only needed once you add PDF statements ---
 # pdfplumber>=0.11         # text + tables from readable PDFs (preferred)

@@ -19,7 +19,11 @@ from pathlib import Path
 import pandas as pd
 
 from src.models.transaction_schema import SCHEMA_COLUMNS, ensure_columns
-from src.services.classification_service import apply_large_payment_flag, classify
+from src.services.classification_service import (
+    apply_large_payment_flag,
+    classify,
+    recompute_flags,
+)
 from src.services.decision_store import (
     DecisionStore,
     manual_entries_as_rows,
@@ -27,7 +31,7 @@ from src.services.decision_store import (
 )
 from src.services.export_service import write_csv
 from src.services.extraction_service import extract_all
-from src.services.normalization_service import normalize
+from src.services.normalization_service import flag_duplicates, normalize
 from src.utils.config_loader import (
     load_aliases,
     load_categories,
@@ -83,6 +87,7 @@ def extract_normalize_classify(source_dir: str, aliases: dict, threshold: float)
     raw = extraction["transactions"]
 
     normalized = normalize(raw, aliases)
+    normalized = flag_duplicates(normalized)
     classified = classify(normalized, threshold=threshold)
 
     # Persist processed artifacts (outside the read-only source folder).
@@ -90,6 +95,7 @@ def extract_normalize_classify(source_dir: str, aliases: dict, threshold: float)
     return {
         "unified": raw,
         "reports": extraction["reports"],
+        "overall_gaps": extraction.get("overall_gaps", []),
         "classified": classified,
         "extracted_at": extraction["extracted_at"],
     }
@@ -103,6 +109,7 @@ def finalize_ledger(classified: pd.DataFrame, store: DecisionStore, threshold: f
     """
     merged = merge_decisions(classified, store)
     merged = apply_large_payment_flag(merged, threshold=threshold)
+    merged = recompute_flags(merged)
 
     manual = manual_entries_as_rows(store)
     if not manual.empty:

@@ -75,6 +75,7 @@ def build_state():
         "threshold": threshold,
         "unified": extraction["unified"],
         "reports": extraction["reports"],
+        "overall_gaps": extraction.get("overall_gaps", []),
         "ledger": ledger,
         "review_statuses": load_review_statuses() or [
             "unreviewed", "confirmed_related", "probably_related",
@@ -173,14 +174,32 @@ def page_unified(state):
     st.header("1 · Unified Extraction View")
     st.caption("Exactly what each parser pulled from each file, before heavy transformation.")
 
+    # --- coverage gap banner --------------------------------------------------
+    overall_gaps = state.get("overall_gaps", [])
+    if overall_gaps:
+        gap_list = ", ".join(overall_gaps[:12]) + (f"  …+{len(overall_gaps)-12} more" if len(overall_gaps) > 12 else "")
+        st.error(
+            f"⚠ **{len(overall_gaps)} month(s) have zero transactions** in the combined dataset. "
+            f"These months are missing — you may need to download additional statements.\n\n"
+            f"**Missing:** {gap_list}"
+        )
+    else:
+        st.success("Coverage looks complete — no month gaps detected between the earliest and latest transaction dates.")
+
     reports = state["reports"]
     if reports:
         st.subheader("Per-file parse report")
         rep_df = pd.DataFrame([
             {
-                "Bank": r["bank_folder"], "File": r["file"], "Parser": r["parser"],
-                "Rows": r["rows"], "Status": r["status"],
-                "Warnings": "; ".join(r["warnings"]), "Errors": "; ".join(r["errors"]),
+                "Bank": r["bank_folder"],
+                "File": r["file"],
+                "Parser": r["parser"],
+                "Rows": r["rows"],
+                "Stated from": r.get("stated_date_from") or "—",
+                "Stated to": r.get("stated_date_to") or "—",
+                "Status": r["status"],
+                "Warnings": "; ".join(r["warnings"]),
+                "Errors": "; ".join(r["errors"]),
                 "Checksum": r["checksum"],
             }
             for r in reports
@@ -233,8 +252,40 @@ def page_combined(state):
     search = c3.text_input("Search description", key="c_search")
     only_manual = c4.checkbox("Only manual entries", key="c_manual")
 
+    from datetime import timedelta
+
     dmin, dmax = _date_bounds(ledger)
-    drange = st.date_input("Date range", value=(dmin, dmax), key="c_dates")
+    all_dates_label = (
+        f"All dates  ({dmin.strftime('%d %b %Y')} – {dmax.strftime('%d %b %Y')})"
+    )
+    _RANGE_PRESETS = [
+        all_dates_label,
+        "Last 30 days",
+        "Last 90 days",
+        "Last 6 months",
+        "Last 1 year",
+        "Custom range",
+    ]
+    preset = st.selectbox("Date range", _RANGE_PRESETS, index=0, key="c_date_preset")
+
+    if preset == all_dates_label:
+        drange = (dmin, dmax)
+    elif preset == "Last 30 days":
+        drange = (max(dmin, dmax - timedelta(days=30)), dmax)
+    elif preset == "Last 90 days":
+        drange = (max(dmin, dmax - timedelta(days=90)), dmax)
+    elif preset == "Last 6 months":
+        drange = (max(dmin, dmax - timedelta(days=183)), dmax)
+    elif preset == "Last 1 year":
+        drange = (max(dmin, dmax - timedelta(days=365)), dmax)
+    else:
+        drange = st.date_input(
+            "Custom date range", value=(dmin, dmax),
+            min_value=dmin, max_value=dmax, key="c_dates_custom",
+        )
+
+    if preset != "Custom range" and isinstance(drange, tuple) and len(drange) == 2:
+        st.caption(f"Effective range: {drange[0].strftime('%d %b %Y')} → {drange[1].strftime('%d %b %Y')}")
 
     view = _filter_ledger(ledger, bank, direction, search, drange, only_manual)
     view = view.sort_values("transaction_date", na_position="last")
@@ -477,6 +528,8 @@ def page_summary(state):
     )
     st.dataframe(cat, use_container_width=True, hide_index=True)
 
+    _income_breakdown(ledger)
+
     st.subheader("Review-status counts")
     rs = ledger["manual_review_status"].fillna("").replace("", "(none)").value_counts()
     st.dataframe(rs.rename_axis("review_status").reset_index(name="count"),
@@ -484,6 +537,58 @@ def page_summary(state):
 
     st.divider()
     _category_exports(state, ledger)
+
+
+def _income_breakdown(ledger: pd.DataFrame):
+    """Employer-wise and IT-refund income breakdown inside an expander."""
+    income = ledger[ledger["category"].isin(["salary_or_income", "it_refund"])]
+    if income.empty:
+        return
+
+    with st.expander("Income breakdown — who paid how much", expanded=True):
+        st.caption(
+            "Auto-classified from NEFT narrations. Verify each row on the Combined Ledger. "
+            "'Amount' here is absolute (all are credits / RECEIVED)."
+        )
+
+        # Determine source employer from description keyword matching.
+        def _employer(desc: str) -> str:
+            d = desc.lower()
+            if "koireader" in d:
+                return "KoiReader Technologies"
+            if "primus" in d:
+                return "Primus Global"
+            return "Other / unidentified"
+
+        sal = income[income["category"] == "salary_or_income"].copy()
+        it_ref = income[income["category"] == "it_refund"].copy()
+
+        if not sal.empty:
+            sal["employer"] = sal["description"].apply(_employer)
+            emp_summary = (
+                sal.groupby("employer")
+                .apply(lambda g: pd.Series({
+                    "payments": len(g),
+                    "total_received": g["amount"].sum(),
+                    "first_payment": g["transaction_date"].min(),
+                    "last_payment": g["transaction_date"].max(),
+                }), include_groups=False)
+                .reset_index()
+                .sort_values("total_received", ascending=False)
+            )
+            emp_summary["total_received"] = emp_summary["total_received"].apply(format_inr)
+            st.markdown("**Salary / employer credits**")
+            st.dataframe(emp_summary, use_container_width=True, hide_index=True)
+
+        if not it_ref.empty:
+            st.markdown("**Income tax refunds**")
+            it_cols = ["transaction_date", "source_bank", "description", "amount"]
+            it_ref_disp = it_ref[it_cols].copy()
+            it_ref_disp["amount"] = it_ref_disp["amount"].apply(format_inr)
+            st.dataframe(it_ref_disp, use_container_width=True, hide_index=True)
+            st.caption(
+                f"IT refund total: {format_inr(income[income['category'] == 'it_refund']['amount'].sum())}"
+            )
 
 
 def _category_exports(state, ledger):
@@ -676,11 +781,6 @@ PAGES = {
 
 def main():
     st.sidebar.title("🧾 Bank Ledger Dashboard")
-    st.sidebar.warning(
-        "Source files are **read-only**. This app will not modify "
-        "`all_bank_statements/`. Manual edits are stored separately in "
-        "`data/cache/decisions.sqlite`."
-    )
 
     state = build_state()
 
