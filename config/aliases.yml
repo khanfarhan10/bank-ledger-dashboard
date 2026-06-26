@@ -1,0 +1,36 @@
+# Person aliases used for name-based transaction matching.
+#
+# Matching is case-insensitive and ignores surrounding punctuation.
+# Add as many spelling variations as you like — bank narrations are messy.
+# You can also edit/add aliases live from the dashboard (Name Search page).
+#
+# Structure:
+#   people:
+#     <key>:
+#       display_name: "Readable Name"
+#       related_flag: benazir | nazrana   # which summary bucket this feeds
+#       aliases: [ list of lowercase substrings to look for ]
+
+people:
+  benazir:
+    display_name: "Benazir Rahaman"
+    related_flag: benazir
+    aliases:
+      - "benazir"
+      - "benazir rahaman"
+      - "benazir rahman"
+      - "rahaman benazir"
+      - "rahman benazir"
+      - "b rahaman"
+      - "b rahman"
+
+  nazrana:
+    display_name: "Nazrana / Najrana (mother)"
+    related_flag: nazrana
+    aliases:
+      - "nazrana"
+      - "najrana"
+      - "nazrana khatun"
+      - "najrana khatun"
+      - "nazrana khatoon"
+      - "najrana khatoon"

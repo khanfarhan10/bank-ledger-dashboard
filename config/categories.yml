@@ -1,0 +1,33 @@
+# Classification categories.
+#
+# These are the starting categories. You can add more from the dashboard
+# (Classification pages) or by editing this list. New categories added in the
+# UI are stored in the SQLite `categories` table and merged with this list.
+#
+# Categories are intentionally plain strings — no hidden behaviour is attached
+# to any particular name. Classification is rule-based and transparent.
+
+categories:
+  - benazir_payments
+  - nazrana_payments
+  - benazir_repayment
+  - large_expenses
+  - loan_or_emi
+  - insurance
+  - personal_expense
+  - family_expense
+  - cash_withdrawal
+  - transfer
+  - salary_or_income
+  - unknown
+  - review_later
+
+# Manual review statuses available as flags on each transaction.
+review_statuses:
+  - unreviewed
+  - confirmed_related
+  - probably_related
+  - not_related
+  - unknown
+  - review_later
+  - do_not_remember

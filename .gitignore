@@ -1,0 +1,31 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+
+# --- App-generated data (kept out of version control) ---
+# Source statements are read-only inputs; generated artifacts live under data/.
+data/cache/*.sqlite
+data/cache/*.sqlite-journal
+data/processed/*.csv
+data/processed/*.xlsx
+data/exports/*
+data/logs/*
+
+# Keep the folder structure but ignore contents
+!data/cache/.gitkeep
+!data/processed/.gitkeep
+!data/exports/.gitkeep
+!data/logs/.gitkeep
+
+# --- OS / editor / tooling noise ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/
+*.swp

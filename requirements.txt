@@ -1,0 +1,13 @@
+# Bank Ledger Dashboard — Python dependencies
+# Local-only app. No cloud, no telemetry.
+
+streamlit>=1.30,<2.0      # dashboard UI
+pandas>=2.0,<3.0          # tabular data handling
+openpyxl>=3.1,<4.0        # read/write modern .xlsx
+xlrd>=2.0,<3.0            # read old binary .xls (ICICI/HDFC exports)
+PyYAML>=6.0,<7.0          # config files (aliases/categories/thresholds)
+
+# --- Optional, only needed once you add PDF statements ---
+# pdfplumber>=0.11         # text + tables from readable PDFs (preferred)
+# tabula-py>=2.9           # table extraction via Java (only if documented)
+# camelot-py[cv]>=0.11     # table extraction (only if documented)

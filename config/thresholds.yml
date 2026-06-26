@@ -1,0 +1,8 @@
+# Tunable numeric thresholds.
+#
+# large_payment_threshold: transactions with absolute amount >= this value
+#   are surfaced on the "Large Payments" page. Editable live from the UI;
+#   the UI-saved value is stored in the SQLite `settings` table and takes
+#   precedence over this file at runtime.
+
+large_payment_threshold: 3000
