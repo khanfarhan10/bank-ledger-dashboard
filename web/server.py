@@ -37,8 +37,10 @@ GRID_COLUMNS = [
     "transaction_id", "transaction_date", "source_bank", "description",
     "amount", "direction", "category", "tags", "detected_names",
     "manual_review_status", "manual_comment", "manual_flags",
-    "is_self_transfer", "is_income", "is_investment", "is_large_payment",
-    "is_duplicate", "is_manual_entry", "raw_description",
+    "is_self_transfer", "is_income", "is_investment", "is_family_savings",
+    "is_large_payment", "is_duplicate", "is_approved", "is_manual_entry",
+    "is_benazir_related", "is_nazrana_related", "is_mother_related",
+    "is_sister_related", "raw_description",
 ]
 
 
@@ -108,12 +110,17 @@ def overview() -> dict:
     ledger = STATE.ledger()
     ext = STATE.extraction()
     ov = analytics.overview(ledger)
-    ov["benazir"] = analytics.person_totals(ledger, "is_benazir_related")
-    ov["nazrana"] = analytics.person_totals(ledger, "is_nazrana_related")
     ov["categories"] = analytics.category_breakdown(ledger)
+    ov["charts"] = analytics.chart_data(ledger)
     ov["overall_gaps"] = ext.get("overall_gaps", [])
     ov["files"] = len(ext.get("reports", []))
+    ov["paytm_merge"] = ext.get("paytm_merge", {})
     return ov
+
+
+@app.get("/api/classification-status")
+def classification_status() -> dict:
+    return analytics.classification_status(STATE.ledger())
 
 
 # --- ledger -----------------------------------------------------------------
@@ -133,23 +140,123 @@ def extraction() -> dict:
     }
 
 
-# --- persons ----------------------------------------------------------------
+# --- Benazir (dedicated relationship ledger, organised as masters) ----------
 
-@app.get("/api/persons")
-def persons() -> dict:
-    df = STATE.ledger()
-    if df is None or df.empty:
-        return {"rows": [], "benazir": {}, "nazrana": {}, "counterparties": []}
+@app.get("/api/benazir")
+def benazir() -> dict:
+    data = analytics.benazir_analytics(STATE.ledger(), STATE.store)
+    # JSON-safe the nested member dicts.
+    for m in data.get("masters", []):
+        m["members"] = _clean(m.get("members", []))
+    return data
 
-    ben = df["is_benazir_related"].fillna(False).astype(bool)
-    naz = df["is_nazrana_related"].fillna(False).astype(bool)
-    matched = df[ben | naz]
-    return {
-        "rows": _grid_rows(matched),
-        "benazir": analytics.person_totals(df, "is_benazir_related"),
-        "nazrana": analytics.person_totals(df, "is_nazrana_related"),
-        "counterparties": analytics.top_counterparties(df, 40),
-    }
+
+class MasterEditIn(BaseModel):
+    code: str
+    title: str | None = None
+    detail: str | None = None
+    base_date: str | None = None
+    summary_amount: float | None = None
+
+
+@app.post("/api/benazir/master")
+def edit_master(body: MasterEditIn) -> dict:
+    STATE.store.update_master(
+        body.code, title=body.title, detail=body.detail,
+        base_date=body.base_date, summary_amount=body.summary_amount,
+    )
+    STATE.invalidate_decisions()
+    return {"ok": True}
+
+
+@app.get("/api/benazir/export.csv")
+def export_benazir_csv():
+    import csv
+    import io
+
+    from fastapi.responses import StreamingResponse
+
+    data = analytics.benazir_analytics(STATE.ledger(), STATE.store)
+    sv = lambda x: "" if x is None or (isinstance(x, float) and pd.isna(x)) else str(x)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Ref", "Date", "Type", "Title / Description", "Paid (₹)",
+                "Received (₹)", "Net (₹)", "Historic", "Note"])
+    for m in data.get("masters", []):
+        w.writerow([
+            f"SUMMARY-{m['code']}", sv(m.get("base_date")), "MASTER",
+            sv(m.get("title")), f"{m.get('paid', 0):.0f}",
+            f"{m.get('received', 0):.0f}", f"{m.get('net', 0):.0f}",
+            "", sv(m.get("detail")),
+        ])
+        for i, mem in enumerate(_clean(m.get("members", [])), start=1):
+            amt = mem.get("amount") or 0
+            paid = amt if mem.get("direction") == "PAID_OUT" else 0
+            recv = amt if mem.get("direction") == "RECEIVED" else 0
+            status = "historic" if mem.get("historic") else ("resolved (to-and-fro)" if mem.get("offset") else "")
+            note = sv(mem.get("offset_note")) or sv(mem.get("manual_comment"))
+            w.writerow([
+                f"{m['code']}.{i}", sv(mem.get("transaction_date")), "detail",
+                sv(mem.get("member_label")) or sv(mem.get("description")),
+                f"{paid:.0f}", f"{recv:.0f}", "", status, note,
+            ])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=benazir_ledger.csv"},
+    )
+
+
+# --- search (generic filter page) -------------------------------------------
+
+@app.get("/api/search")
+def search(
+    q: str = "", min_amount: float | None = None, max_amount: float | None = None,
+    date_from: str = "", date_to: str = "", direction: str = "",
+    category: str = "", bank: str = "", person: str = "",
+) -> dict:
+    rows = analytics.search(
+        STATE.ledger(), q=q, min_amount=min_amount, max_amount=max_amount,
+        date_from=date_from or None, date_to=date_to or None,
+        direction=direction, category=category, bank=bank, person=person,
+    )
+    return {"rows": _clean(rows), "count": len(rows)}
+
+
+@app.get("/api/counterparties")
+def counterparties() -> dict:
+    return {"counterparties": analytics.top_counterparties(STATE.ledger(), 50)}
+
+
+# --- family (mother + sister) -----------------------------------------------
+
+@app.get("/api/family")
+def family() -> dict:
+    return analytics.family_analytics(STATE.ledger(), STATE.store)
+
+
+class FamilyOverrideIn(BaseModel):
+    person: str
+    total_saved: float
+    note: str = ""
+
+
+@app.post("/api/family/override")
+def family_override(body: FamilyOverrideIn) -> dict:
+    STATE.store.set_family_override(body.person, body.total_saved, body.note)
+    return {"ok": True}
+
+
+# --- accident / marriage ----------------------------------------------------
+
+@app.get("/api/accident")
+def accident() -> dict:
+    return analytics.accident_analytics(STATE.ledger())
+
+
+@app.get("/api/marriage")
+def marriage() -> dict:
+    return analytics.marriage_analytics(STATE.ledger())
 
 
 # --- investments / income ---------------------------------------------------
@@ -265,6 +372,49 @@ def reset_decision(body: ResetIn) -> dict:
     STATE.store.reset_decision(body.transaction_id, reason="Reset via web dashboard")
     STATE.invalidate_decisions()
     return {"ok": True}
+
+
+# --- approval workflow (confirm / deny / bulk) ------------------------------
+
+class ConfirmIn(BaseModel):
+    transaction_id: str
+
+
+@app.post("/api/decision/confirm")
+def confirm_decision(body: ConfirmIn) -> dict:
+    """Approve the current auto-classification as-is (keeps the category)."""
+    STATE.store.save_decision(
+        body.transaction_id, manual_review_status="confirmed_related",
+        reason="Confirmed auto-classification",
+    )
+    STATE.invalidate_decisions()
+    return {"ok": True}
+
+
+@app.post("/api/decision/deny")
+def deny_decision(body: ConfirmIn) -> dict:
+    """Reject the auto-classification -> send the row to 'unknown'."""
+    STATE.store.save_decision(
+        body.transaction_id, category="unknown", manual_review_status="not_related",
+        reason="Denied auto-classification",
+    )
+    STATE.invalidate_decisions()
+    return {"ok": True}
+
+
+class BulkApproveIn(BaseModel):
+    transaction_ids: list[str]
+
+
+@app.post("/api/decision/bulk-approve")
+def bulk_approve(body: BulkApproveIn) -> dict:
+    for tid in body.transaction_ids:
+        STATE.store.save_decision(
+            tid, manual_review_status="confirmed_related",
+            reason="Bulk-approved",
+        )
+    STATE.invalidate_decisions()
+    return {"ok": True, "count": len(body.transaction_ids)}
 
 
 # --- threshold / refresh ----------------------------------------------------

@@ -14,6 +14,7 @@ interaction to reflect edits immediately.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -96,29 +97,34 @@ def extract_normalize_classify(source_dir: str, aliases: dict, threshold: float)
         "unified": raw,
         "reports": extraction["reports"],
         "overall_gaps": extraction.get("overall_gaps", []),
+        "paytm_merge": extraction.get("paytm_merge", {}),
         "classified": classified,
         "extracted_at": extraction["extracted_at"],
     }
 
 
 def finalize_ledger(classified: pd.DataFrame, store: DecisionStore, threshold: float) -> pd.DataFrame:
-    """Steps 4-5. Overlay manual decisions and append manual entries.
-
-    Returns the master combined ledger (full schema), with the large-payment
-    flag recomputed for the current threshold.
+    """Steps 4-5. Append manual entries, THEN overlay manual decisions over the
+    whole ledger so that decisions (reclassify / confirm / deny) apply to manual
+    entries too — not just bank rows. Returns the full-schema combined ledger.
     """
-    merged = merge_decisions(classified, store)
+    base = ensure_columns(classified, SCHEMA_COLUMNS)
+    manual = manual_entries_as_rows(store)
+    if not manual.empty:
+        manual = ensure_columns(manual, SCHEMA_COLUMNS)
+        # Manual entries legitimately have all-NA columns (balance, value_date);
+        # the resulting pandas FutureWarning about concat dtype is benign here.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            full = pd.concat([base, manual], ignore_index=True) if not base.empty else manual
+    else:
+        full = base
+
+    merged = merge_decisions(full, store)
     merged = apply_large_payment_flag(merged, threshold=threshold)
     merged = recompute_flags(merged)
 
-    manual = manual_entries_as_rows(store)
-    if not manual.empty:
-        manual = apply_large_payment_flag(manual, threshold=threshold)
-        combined = pd.concat([merged, manual], ignore_index=True)
-    else:
-        combined = merged
-
-    combined = ensure_columns(combined, SCHEMA_COLUMNS)
+    combined = ensure_columns(merged, SCHEMA_COLUMNS)
     _safe_write(combined, "combined_transactions")
     return combined
 

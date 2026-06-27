@@ -1,0 +1,122 @@
+# Benazir relationship ledger — organised as MASTERS.
+#
+# Each master is ONE logical expense/event (SUMMARY-A, SUMMARY-B, ...) with a
+# headline plus the detail/historic transactions that back it. Members are
+# matched to real bank/Paytm rows where possible (rigorously verified from the
+# raw records); where a payment isn't a single bank row (credit-card EMI,
+# Flipkart, pre-2024, or split) it is added as a manual entry.
+#
+# Header fields (title / detail / base_date) are EDITABLE in the dashboard;
+# this file is just the seed. base_date defaults to the earliest member date.
+#
+# member fields:
+#   amount, direction (PAID_OUT/RECEIVED), date
+#   manual: true        -> always create a manual entry (not in bank data)
+#   match: true         -> find the real bank/Paytm row by date+amount (default)
+#   historic: true      -> kept as evidence; EXCLUDED from the master's net total
+#   label               -> short description for this line
+#
+# summary_amount (optional): explicit headline; else computed = paid - received
+#                            over non-historic members.
+
+masters:
+  - code: A
+    title: "iPhone 16 Pro Max (gift)"
+    detail: "Apple iPhone 16 Pro Max bought for Benazir (Amazon). Paid as a 6-month credit-card EMI of 20,271 each = 1,21,626 total."
+    base_date: 2025-10-21
+    kind: expense
+    members:
+      - { manual: true, date: 2025-11-21, amount: 20271, direction: PAID_OUT, label: "CC EMI 1/6" }
+      - { manual: true, date: 2025-12-21, amount: 20271, direction: PAID_OUT, label: "CC EMI 2/6" }
+      - { manual: true, date: 2026-01-21, amount: 20271, direction: PAID_OUT, label: "CC EMI 3/6" }
+      - { manual: true, date: 2026-02-21, amount: 20271, direction: PAID_OUT, label: "CC EMI 4/6" }
+      - { manual: true, date: 2026-03-21, amount: 20271, direction: PAID_OUT, label: "CC EMI 5/6" }
+      - { manual: true, date: 2026-04-21, amount: 20271, direction: PAID_OUT, label: "CC EMI 6/6" }
+
+  - code: B
+    title: "iPhone 16 for Zara (Benazir's sister)"
+    detail: "iPhone 16 for Zara (total 54,897, Flipkart/credit-card). Benazir reimbursed 45,000 (25,000 + 20,000 on 21 Oct 2025), so my net cost was ~9,897."
+    base_date: 2025-10-21
+    kind: expense
+    members:
+      - { manual: true, date: 2025-10-21, amount: 54897, direction: PAID_OUT, label: "iPhone 16 for Zara — my payment (Flipkart/CC, not in bank data)" }
+      - { match: true, date: 2025-10-21, amount: 25000, direction: RECEIVED, label: "Benazir reimbursement 1/2 (GPay, ref 566048945672)" }
+      - { match: true, date: 2025-10-21, amount: 20000, direction: RECEIVED, label: "Benazir reimbursement 2/2 (GPay, ref 566078640683)" }
+
+  - code: C
+    title: "Axis Bank personal loan (taken for Benazir)"
+    detail: "Took an Axis personal loan for Benazir's urgent need (avoided pledging her mother's jewellery). Net repayable by me = 1,63,524 (1,50,000 @ 16.25%, 12 months, EMI 13,627) — this is what she owes. The disbursal & same-day distribution below are historic record only (I kept none)."
+    base_date: 2026-05-01
+    kind: expense
+    summary_amount: 163524
+    members:
+      - { match: true, date: 2026-05-01, amount: 144770, direction: RECEIVED, historic: true, label: "Loan disbursed to me (NEFT-AXOMM)" }
+      - { match: true, date: 2026-05-01, amount: 90000,  direction: PAID_OUT, historic: true, label: "Forwarded to Benazir" }
+      - { match: true, date: 2026-05-01, amount: 54006,  direction: PAID_OUT, historic: true, label: "Forwarded to Najrana (her mother)" }
+      - { match: true, date: 2026-05-01, amount: 770,    direction: PAID_OUT, historic: true, label: "Forwarded to Benazir (small)" }
+      - { match: true, date: 2026-05-01, amount: 1,      direction: PAID_OUT, historic: true, label: "Test transfer to Benazir (1 rupee)" }
+
+  - code: D
+    title: "Buni's studies & materials"
+    detail: "Direct help for Benazir's (Buni's) studies — 60,000 (10 Jun 2025) + 1,00,000 (3 Jul 2025, incl. gold-loan repayment, study material & IEM uniform). Net 1,60,000 sent directly to her."
+    base_date: 2025-06-10
+    kind: expense
+    members:
+      - { match: true, date: 2025-06-10, amount: 60000,  direction: PAID_OUT, label: "Buni's studies" }
+      - { match: true, date: 2025-07-03, amount: 100000, direction: PAID_OUT, label: "Gold-loan repayment + study material + IEM uniform" }
+
+  - code: E
+    title: "Kotak Life policy (shared bad decision)"
+    detail: "Kotak Mahindra Life Insurance — 1,02,176 paid (27 Sep 2025, credit card) and 41,371 refunded (25 Sep 2025). Net loss ~60,805. NOTE: confirm how this splits between you and Benazir — earlier notes said a 50/50 split."
+    base_date: 2025-09-25
+    kind: expense
+    members:
+      - { match: true, date: 2025-09-27, amount: 102176, direction: PAID_OUT, label: "Kotak Life premium (credit card)" }
+      - { match: true, date: 2025-09-25, amount: 41371,  direction: RECEIVED, label: "Kotak Life refund" }
+
+  - code: F
+    title: "Salary replacement (between jobs)"
+    detail: "Money given while Benazir was between jobs. Chat-verified: 11,000 (3 Feb) and ~18,000 (26 Jun, recalled 19,200) are matched bank rows; 8,500 (chat: 'Send me / Mera loan'), and late-May ~26,000 (chat: '40k gold... money I have taken') are recalled. The 24,000 around end-Mar is uncertain (chat shows a Sikkim-trip plan ~26k that week) — REVIEW."
+    base_date: 2025-01-30
+    kind: expense
+    members:
+      - { match: true, date: 2025-02-03, amount: 11000, direction: PAID_OUT, label: "Salary replacement (matched)" }
+      - { match: true, date: 2025-06-26, amount: 18000, direction: PAID_OUT, label: "Salary replacement (matched ₹18,000; you recalled ₹19,200)" }
+      - { manual: true, date: 2025-01-30, amount: 8500,  direction: PAID_OUT, label: "Salary replacement (recalled — chat: 'Mera loan')" }
+      - { manual: true, date: 2025-05-28, amount: 26000, direction: PAID_OUT, label: "Salary replacement (recalled — chat: '40k gold... money I have taken')" }
+      - { manual: true, date: 2025-03-31, amount: 24000, direction: PAID_OUT, label: "Salary replacement? (recalled — REVIEW: chat shows a Sikkim-trip plan that week)" }
+
+  - code: G
+    title: "Rent & education-EMI defaults"
+    detail: "Covered when Benazir couldn't keep up. Education-loan residue (2 months + penalty) = 21,049 (23 Jan 2026, matched). Room rent 4,207 (Jul 2025) is recalled — not a single bank/Paytm row (likely cash/split)."
+    base_date: 2025-07-31
+    kind: expense
+    members:
+      - { match: true, date: 2026-01-23, amount: 21049, direction: PAID_OUT, label: "Education-loan residue + penalty (2 months)" }
+      - { manual: true, date: 2025-07-31, amount: 4207,  direction: PAID_OUT, label: "Room rent (recalled — not in statements)" }
+
+  - code: H
+    title: "Previous-job compensation / relieving letter"
+    detail: "Paid 30,000 for Benazir's relieving letter from her previous employer (left without serving notice), enabling her latest job. Chat-dated to ~23 Jun 2025 (FHK, 24 Jun: 'Bennus needs 23 Jun - 30k for relieving letter from ex company'). Not a single bank row — recalled."
+    base_date: 2025-06-23
+    kind: expense
+    members:
+      - { manual: true, date: 2025-06-23, amount: 30000, direction: PAID_OUT, label: "Relieving-letter / compensation filing (chat-dated 23 Jun 2025)" }
+
+  - code: I
+    title: "Samsung Galaxy Book4 laptop (gift)"
+    detail: "Samsung Galaxy Book4 (Intel Core i5 13th Gen 1335U, 16GB/512GB SSD, Win 11 Home, NP750XGJ; IMEI 0WSR9ZAYC00642). Her previous laptop had failed. Flipkart invoice total 50,846 (57,846 − 7,000 discount, +9% CGST +9% SGST); declared total 52,652. Bought on Flipkart/credit card — not in bank data."
+    base_date: 2025-12-01
+    kind: expense
+    summary_amount: 52652
+    members:
+      - { manual: true, date: 2025-12-01, amount: 52652, direction: PAID_OUT, label: "Samsung Galaxy Book4 (Flipkart/CC — set exact date)" }
+
+  - code: J
+    title: "Motorola G85 5G phone (gift)"
+    detail: "Motorola G85 5G (Olive Green, 256 GB; IMEI 352532332688353), bought for Benazir. Flipkart/credit card — not in bank data. Recalled amount 20,058."
+    base_date: 2024-12-11
+    kind: expense
+    summary_amount: 20058
+    members:
+      - { manual: true, date: 2024-12-11, amount: 20058, direction: PAID_OUT, label: "Motorola G85 5G (Flipkart/CC)" }

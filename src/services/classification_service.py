@@ -33,10 +33,27 @@ from src.services.self_transfer import SelfTransferDetector
 # Categories that represent real income (credits that aren't self-transfers).
 _INCOME_CATEGORIES = {
     "salary_or_income",
+    "freelance_income",
     "it_refund",
     "interest_income",
     "cashback_reward",
 }
+
+# Money that is NOT consumption: family savings + my own family transfers.
+_FAMILY_SAVINGS_CATEGORIES = {"mother_payments", "sister_payments", "family_savings"}
+
+# --- date windows for life events (auto-classify; user confirms) -------------
+_ACCIDENT_DATE = pd.Timestamp("2024-02-08")
+_ACCIDENT_WINDOW_DAYS = 120          # ~4 months of recovery/treatment
+_MARRIAGE_DATE = pd.Timestamp("2023-04-29")
+_MARRIAGE_WINDOW_DAYS = 60
+_MARRIAGE_MIN_AMOUNT = 10000         # only large payments count toward marriage
+
+_MEDICAL_KEYWORDS = (
+    "hospital", "clinic", "pharmacy", "medical", "medicine", "chemist", "apollo",
+    "medplus", "netmeds", "1mg", "pharmeasy", "diagnostic", "lab", "surgery",
+    "surgical", "ortho", "physio", "scan", "mri", "x-ray", "nursing", "health",
+)
 
 
 def classify(df: pd.DataFrame, *, threshold: float) -> pd.DataFrame:
@@ -60,6 +77,9 @@ def classify(df: pd.DataFrame, *, threshold: float) -> pd.DataFrame:
     out["is_manual_entry"] = False
     out["is_linked_entry"] = False
     out["is_duplicate"] = out.get("is_duplicate", False)
+    # Auto-classified rows start UNAPPROVED; merge_decisions flips this when the
+    # user confirms / edits a row.
+    out["is_approved"] = False
     return out
 
 
@@ -74,6 +94,8 @@ def _classify_row(row: pd.Series, threshold: float, detector: SelfTransferDetect
 
     tags = match_tags(text)
     investment_tags = match_investment_tags(text)
+
+    dt = pd.to_datetime(row.get("transaction_date"), errors="coerce")
 
     category = "unknown"
     confidence = 0.0
@@ -92,7 +114,8 @@ def _classify_row(row: pd.Series, threshold: float, detector: SelfTransferDetect
         if "self_transfer" not in tags:
             tags.insert(0, "self_transfer")
 
-    # 2) Person-related.
+    # 2) People — Benazir + her mother Nazrana (the relationship ledger), then
+    #    my mother (Husna) and sister (Zarinne), treated as family savings.
     elif bool(row.get("is_benazir_related")):
         category = "benazir_payments"
         confidence = 0.9
@@ -101,8 +124,16 @@ def _classify_row(row: pd.Series, threshold: float, detector: SelfTransferDetect
         category = "nazrana_payments"
         confidence = 0.9
         reasons.append(f'Matched Nazrana/Najrana alias ({matched_aliases or "alias"}).')
+    elif bool(row.get("is_mother_related")):
+        category = "mother_payments"
+        confidence = 0.9
+        reasons.append("To/from my mother (Husna Ara Bano) — family savings by default.")
+    elif bool(row.get("is_sister_related")):
+        category = "sister_payments"
+        confidence = 0.9
+        reasons.append("To/from my sister (Zarinne) — family savings by default.")
 
-    # 3) Regex category rules.
+    # 3) Regex category rules + date-aware life events.
     else:
         cat, reason = match_category(text, direction)
         if cat is not None:
@@ -110,11 +141,22 @@ def _classify_row(row: pd.Series, threshold: float, detector: SelfTransferDetect
             confidence = 0.7
             reasons.append(reason)
         elif investment_tags:
-            # Tag-detected investment the category regex missed: keep them
-            # consistent (paid = investing, received = redemption).
             category = "investment" if direction == "PAID_OUT" else "investment_redemption"
             confidence = 0.6
             reasons.append(f"Investment instrument detected ({investment_tags[0]}).")
+
+        # Accident window: upgrade medical-looking debits to accident_medical.
+        if _in_window(dt, _ACCIDENT_DATE, _ACCIDENT_WINDOW_DAYS):
+            if category in ("medical", "unknown") and _has_kw(text, _MEDICAL_KEYWORDS):
+                category = "accident_medical"
+                confidence = 0.55
+                reasons.append("Medical payment within the post-accident window (Feb 2024) — confirm.")
+        # Marriage window: large uncategorised payments around Apr 2023.
+        if category == "unknown" and amount >= _MARRIAGE_MIN_AMOUNT \
+                and _in_window(dt, _MARRIAGE_DATE, _MARRIAGE_WINDOW_DAYS):
+            category = "marriage_expense"
+            confidence = 0.45
+            reasons.append("Large payment around Zarinne's marriage (Apr 2023) — confirm.")
 
     # Derived flags (independent of the headline category).
     if not is_self:
@@ -122,6 +164,7 @@ def _classify_row(row: pd.Series, threshold: float, detector: SelfTransferDetect
             is_income = True
         if category == "investment" or investment_tags:
             is_investment = True
+    is_family_savings = category in _FAMILY_SAVINGS_CATEGORIES
 
     if is_large:
         reasons.append(
@@ -145,7 +188,19 @@ def _classify_row(row: pd.Series, threshold: float, detector: SelfTransferDetect
         "is_self_transfer": bool(is_self),
         "is_income": bool(is_income),
         "is_investment": bool(is_investment),
+        "is_family_savings": bool(is_family_savings),
     }
+
+
+def _in_window(dt, center: pd.Timestamp, days: int) -> bool:
+    """True if a parsed date falls within +/- ``days`` of ``center``."""
+    if dt is None or pd.isna(dt):
+        return False
+    return abs((dt - center).days) <= days
+
+
+def _has_kw(text: str, keywords) -> bool:
+    return any(k in text for k in keywords)
 
 
 def apply_large_payment_flag(df: pd.DataFrame, *, threshold: float) -> pd.DataFrame:
@@ -162,11 +217,9 @@ _INVESTMENT_CATEGORIES = {"investment", "investment_redemption"}
 
 
 def recompute_flags(df: pd.DataFrame) -> pd.DataFrame:
-    """Re-derive is_self_transfer / is_income / is_investment from the FINAL
-    category, so manual overrides (e.g. right-click "mark as self-transfer",
-    or reclassifying to "salary_or_income") stay consistent with analytics.
-
-    Run this after manual decisions are merged in.
+    """Re-derive flags from the FINAL category, so manual overrides (e.g.
+    right-click "mark as self-transfer", or reclassifying to "salary_or_income")
+    stay consistent with analytics. Run after manual decisions are merged in.
     """
     if df is None or df.empty:
         return df
@@ -174,8 +227,7 @@ def recompute_flags(df: pd.DataFrame) -> pd.DataFrame:
     cat = out["category"].fillna("")
     direction = out["direction"].fillna("").str.upper()
 
-    self_flag = out.get("is_self_transfer")
-    self_flag = self_flag.fillna(False).astype(bool) if self_flag is not None else pd.Series(False, index=out.index)
+    self_flag = _bool(out, "is_self_transfer")
     out["is_self_transfer"] = self_flag | (cat == "self_transfer")
 
     out["is_income"] = (
@@ -184,10 +236,16 @@ def recompute_flags(df: pd.DataFrame) -> pd.DataFrame:
         & ~out["is_self_transfer"]
     )
 
-    invest_flag = out.get("is_investment")
-    invest_flag = invest_flag.fillna(False).astype(bool) if invest_flag is not None else pd.Series(False, index=out.index)
-    out["is_investment"] = invest_flag | cat.isin(_INVESTMENT_CATEGORIES)
+    out["is_investment"] = _bool(out, "is_investment") | cat.isin(_INVESTMENT_CATEGORIES)
+    out["is_family_savings"] = _bool(out, "is_family_savings") | cat.isin(_FAMILY_SAVINGS_CATEGORIES)
     return out
+
+
+def _bool(df: pd.DataFrame, name: str) -> pd.Series:
+    col = df.get(name)
+    if col is None:
+        return pd.Series(False, index=df.index)
+    return col.astype("boolean").fillna(False).astype(bool)
 
 
 def _num(value) -> float:

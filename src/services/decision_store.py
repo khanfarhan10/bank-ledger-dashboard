@@ -123,6 +123,42 @@ class DecisionStore:
                     value      TEXT,
                     updated_at TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS family_overrides (
+                    person      TEXT PRIMARY KEY,   -- 'mother' | 'sister'
+                    total_saved REAL,               -- user-overridable; default = total sent
+                    note        TEXT,
+                    updated_at  TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS transaction_groups (
+                    group_id    TEXT,               -- logical unit id (e.g. benazir_iphone)
+                    label       TEXT,
+                    transaction_id TEXT,
+                    created_at  TEXT,
+                    PRIMARY KEY (group_id, transaction_id)
+                );
+
+                -- Benazir "masters" (SUMMARY-A, B, ...) — editable headers.
+                CREATE TABLE IF NOT EXISTS benazir_masters (
+                    code           TEXT PRIMARY KEY,
+                    title          TEXT,
+                    detail         TEXT,
+                    base_date      TEXT,
+                    summary_amount REAL,
+                    kind           TEXT,
+                    sort_order     INTEGER,
+                    updated_at     TEXT
+                );
+
+                -- Which transactions belong to a master (and whether historic).
+                CREATE TABLE IF NOT EXISTS master_members (
+                    code           TEXT,
+                    transaction_id TEXT,
+                    label          TEXT,
+                    historic       INTEGER DEFAULT 0,
+                    PRIMARY KEY (code, transaction_id)
+                );
                 """
             )
         get_logger().info("Decision store ready at %s", self.db_path)
@@ -377,6 +413,104 @@ class DecisionStore:
         if str(old or "") != str(value):
             self._audit("setting", key, key, old, value, None)
 
+    # -- family overrides (mother / sister saved amounts) ---------------------
+
+    def set_family_override(self, person: str, total_saved: float, note: str = "") -> None:
+        person = (person or "").strip().lower()
+        old = self.get_family_override(person)
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO family_overrides (person, total_saved, note, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(person) DO UPDATE SET
+                     total_saved=excluded.total_saved, note=excluded.note,
+                     updated_at=excluded.updated_at""",
+                (person, float(total_saved), note, _now()),
+            )
+        self._audit("family_override", person, "total_saved",
+                    old.get("total_saved") if old else None, total_saved, note)
+
+    def get_family_override(self, person: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM family_overrides WHERE person = ?",
+                ((person or "").strip().lower(),),
+            ).fetchone()
+        return dict(row) if row else None
+
+    # -- transaction groups (logical units, e.g. "benazir_iphone") ------------
+
+    def set_group(self, group_id: str, label: str, transaction_ids: list[str]) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM transaction_groups WHERE group_id = ?", (group_id,))
+            for tid in transaction_ids:
+                conn.execute(
+                    """INSERT OR IGNORE INTO transaction_groups
+                       (group_id, label, transaction_id, created_at) VALUES (?, ?, ?, ?)""",
+                    (group_id, label, tid, _now()),
+                )
+
+    def get_groups_df(self) -> pd.DataFrame:
+        with self._connect() as conn:
+            return pd.read_sql_query("SELECT * FROM transaction_groups", conn)
+
+    # -- Benazir masters ------------------------------------------------------
+
+    def upsert_master(self, code, title, detail, base_date, summary_amount=None,
+                      kind="expense", sort_order=0) -> None:
+        """Insert a master header, or update only fields the user hasn't edited.
+
+        On re-seed we keep the user's edited title/detail/base_date by using
+        INSERT OR IGNORE for those, then ensuring sort/kind/seed defaults exist.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO benazir_masters
+                     (code, title, detail, base_date, summary_amount, kind, sort_order, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(code) DO UPDATE SET
+                     summary_amount=excluded.summary_amount,
+                     kind=excluded.kind, sort_order=excluded.sort_order""",
+                (code, title, detail, base_date,
+                 None if summary_amount is None else float(summary_amount),
+                 kind, sort_order, _now()),
+            )
+
+    def update_master(self, code, **fields) -> None:
+        """User edit of a master header (title / detail / base_date / summary_amount)."""
+        allowed = {"title", "detail", "base_date", "summary_amount", "kind"}
+        sets = {k: v for k, v in fields.items() if k in allowed and v is not None}
+        if not sets:
+            return
+        sets["updated_at"] = _now()
+        assign = ", ".join(f"{k} = ?" for k in sets)
+        with self._connect() as conn:
+            conn.execute(f"UPDATE benazir_masters SET {assign} WHERE code = ?",
+                         (*sets.values(), code))
+        self._audit("benazir_master", code, "edit", "", str(sets), None)
+
+    def get_masters_df(self) -> pd.DataFrame:
+        with self._connect() as conn:
+            return pd.read_sql_query("SELECT * FROM benazir_masters ORDER BY sort_order", conn)
+
+    def set_master_member(self, code, transaction_id, label="", historic=False) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO master_members (code, transaction_id, label, historic)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(code, transaction_id) DO UPDATE SET
+                     label=excluded.label, historic=excluded.historic""",
+                (code, transaction_id, label, 1 if historic else 0),
+            )
+
+    def clear_master_members(self, code) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM master_members WHERE code = ?", (code,))
+
+    def get_master_members_df(self) -> pd.DataFrame:
+        with self._connect() as conn:
+            return pd.read_sql_query("SELECT * FROM master_members", conn)
+
     # -- audit ----------------------------------------------------------------
 
     def _audit(self, entity_type, entity_id, field, old_value, new_value, reason) -> None:
@@ -429,6 +563,13 @@ def merge_decisions(df: pd.DataFrame, store: "DecisionStore") -> pd.DataFrame:
         if dec is None:
             continue
 
+        # "Approved" means the user explicitly confirmed/denied via the approval
+        # workflow (which sets a manual_review_status). A seeded category/comment
+        # alone does NOT count as approved — it stays unverified until the user
+        # clicks ✓ / ✗.
+        if _has(dec.get("manual_review_status")):
+            out.at[idx, "is_approved"] = True
+
         if _has(dec.get("category")):
             out.at[idx, "category"] = dec["category"]
             out.at[idx, "classification_status"] = "manual"
@@ -451,6 +592,10 @@ def merge_decisions(df: pd.DataFrame, store: "DecisionStore") -> pd.DataFrame:
             out.at[idx, "is_benazir_related"] = True
         if person in ("nazrana", "both"):
             out.at[idx, "is_nazrana_related"] = True
+        if person == "mother":
+            out.at[idx, "is_mother_related"] = True
+        if person == "sister":
+            out.at[idx, "is_sister_related"] = True
 
     return out
 
@@ -508,7 +653,11 @@ def manual_entries_as_rows(store: "DecisionStore") -> pd.DataFrame:
             "confidence": 1.0,
             "is_benazir_related": "benazir" in person,
             "is_nazrana_related": person in ("nazrana", "najrana"),
+            "is_mother_related": person in ("mother", "husna", "husna ara bano"),
+            "is_sister_related": person in ("sister", "zarinne"),
             "is_manual_entry": True,
+            # Manual entries are unverified until the user reviews them.
+            "is_approved": (e.get("review_status") or "") not in ("", "unreviewed"),
             "is_linked_entry": bool(links_by_entry.get(e["manual_entry_id"])),
             "manual_comment": e.get("reason") or "",
             "manual_review_status": e.get("review_status") or "",

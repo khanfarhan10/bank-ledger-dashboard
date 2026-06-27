@@ -47,6 +47,7 @@ bank-ledger-dashboard/
     │   ├── base.py                 # BaseParser + ParseResult contract
     │   ├── icici_excel_parser.py   # implemented
     │   ├── hdfc_excel_parser.py    # implemented
+    │   ├── paytm_excel_parser.py   # Paytm UPI .xlsx (sits atop the banks)
     │   ├── icici_pdf_parser.py     # documented placeholder
     │   ├── hdfc_pdf_parser.py      # documented placeholder
     │   └── generic_pdf_parser.py   # documented placeholder
@@ -57,6 +58,7 @@ bank-ledger-dashboard/
     │   ├── classification_rules.py # the regex rule sets (categories + multi-tags)
     │   ├── classification_service.py# applies rules + self-transfer + multi-label tags
     │   ├── self_transfer.py        # own-account / self-transfer detection
+    │   ├── paytm_merge.py          # fold Paytm into bank rows (RRN dedup + enrich)
     │   ├── analytics.py            # corrected totals, income, investments, counterparties
     │   ├── decision_store.py       # SQLite store + decision/entry overlay helpers
     │   ├── export_service.py       # CSV/XLSX bytes + saved exports

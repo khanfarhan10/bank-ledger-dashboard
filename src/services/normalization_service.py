@@ -54,7 +54,11 @@ def _normalize_row(row: pd.Series, aliases: dict, ts: str) -> dict:
     amount, direction = _amount_and_direction(debit, credit)
 
     description = str(row.get("description") or "")
-    detected_keys, matched_alias_strings, flags = _detect_people(description, aliases)
+    # Paytm enrichment lands in counterparty_name; include it in name detection
+    # but NOT in the transaction_id hash, so ids stay stable across re-runs.
+    counterparty = str(row.get("counterparty_name") or "")
+    detect_text = (description + " " + counterparty).strip()
+    detected_keys, matched_alias_strings, flags = _detect_people(detect_text, aliases)
 
     txn_id = transaction_id(
         bank=row.get("source_bank"),
@@ -92,12 +96,14 @@ def _normalize_row(row: pd.Series, aliases: dict, ts: str) -> dict:
         "direction": direction,
         "balance": _num(row.get("balance")),
         # names
-        "counterparty_name": "",
+        "counterparty_name": counterparty,
         "detected_names": ",".join(detected_keys),
         "matched_aliases": ",".join(matched_alias_strings),
         # per-person flags
         "is_benazir_related": flags["benazir"],
         "is_nazrana_related": flags["nazrana"],
+        "is_mother_related": flags["mother"],
+        "is_sister_related": flags["sister"],
     }
 
 
@@ -146,7 +152,7 @@ def _detect_people(description: str, aliases: dict) -> tuple[list[str], list[str
     haystack = _normalize_text(description)
     person_keys: list[str] = []
     matched_alias_strings: list[str] = []
-    flags = {"benazir": False, "nazrana": False}
+    flags = {"benazir": False, "nazrana": False, "mother": False, "sister": False}
 
     for key, person in aliases.items():
         related_flag = (person or {}).get("related_flag", key)

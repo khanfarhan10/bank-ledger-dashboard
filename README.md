@@ -134,24 +134,46 @@ tax_saving_80c`). Nothing about "owed" is ever inferred — that's manual only.
 
 ## The pages (web app)
 
-1. **Overview** — corrected headline metrics (real income, real expense,
-   invested, net), self-transfers/duplicates excluded, category breakdown, and
-   data-coverage status (missing months).
-2. **Ledger** — the master transaction grid: filter by bank / direction /
-   category / search, hide self-transfers, right-click for actions, edit inline.
-3. **People** — Benazir / Nazrana net totals and matched transactions, plus a
-   **Top counterparties** table so you can spot who recurs and tag them.
-4. **Investments** — by instrument (Groww, Zerodha, SGB, PPF, NPS, …) and an 80C
-   tax-saving subtotal.
-5. **Income** — who paid you and how much, over the whole period.
-6. **Large** — everything at/above a live, savable threshold.
-7. **Manual** — record payments that don't show the person's name and link them
-   to bank transactions.
+1. **Ledger** — the master grid: filter by bank / direction / category / search,
+   hide self-transfers, "pending only" view, right-click actions, inline edit,
+   ✓ confirm / ✗ deny each auto-classification.
+2. **Benazir** — dedicated relationship ledger organised as **masters**
+   (SUMMARY-A, B, …). Each master is one logical expense (iPhone, Zara's iPhone,
+   Axis loan, studies, Kotak, salary-replacement, rent, job-comp) with an
+   **editable header** (title / details / base date / declared net) and its
+   backing records sorted latest-first. *Historic* records (e.g. loan disbursal
+   mechanics) are evidence only and don't add to the net. Confirm ✓ / deny ✗
+   each record, and **export the whole page to CSV** (SUMMARY-A / A.1 / A.2 …).
+   Masters are seeded from `config/benazir_masters.yml`
+   (`python scripts/seed_benazir.py`).
+3. **Search** — generic filter by keyword, amount range, date range, direction,
+   category, and person.
+4. **Family** — my mother (Husna) and sister (Zarinne) as *self-investment*,
+   with a per-person **saved** override (default = net sent).
+5. **Investments** — bank-detected (Groww, Zerodha, SGB, PPF, NPS) + 80C subtotal,
+   plus your manually-recorded portfolio (Kotak, WazirX, MF accounts).
+6. **Income** — sectioned by source: KoiReader salary, Primus freelancing, tax
+   refunds, interest, insurance claims.
+7. **Accident & Marriage** — the 08 Feb 2024 accident (ICICI Lombard claim +
+   recovery spend, incl. physio "Hamid") and ~29 Apr 2023 marriage window,
+   auto-classified for you to confirm.
+8. **Large** — everything at/above a live, savable threshold.
+9. **Manual** — record payments that don't show the person's name.
+10. **Summary** — approval status (approved / unverified / unknown), interactive
+    pie/bar/line charts, and data-coverage (missing months).
 
-> **Identifying counterparties:** the People page surfaces big recurring
-> counterparties inferred from narrations (e.g. `9471351129@icic`,
-> `Husna Ara Bano`). They are *not* assumed to relate to anyone — right-click
-> them in the Ledger to mark who they are.
+### The approval workflow
+
+Every auto-classification starts **unverified**. Confirm (✓) keeps it, deny (✗)
+sends it to `unknown`, or reclassify to any category — all from the right-click
+menu or the ✓/✗ columns. The Summary tab shows how many remain to review.
+
+> **People in the data:** `9471351129` = sister Zarinne, `9852378779` = mother
+> Husna, `8617663869` = Benazir. Several Benazir payments were sent from PNB/SBI
+> accounts not yet loaded — they appear as recalled manual entries (see
+> `config/benazir_reasons.yml`). See
+> [`docs/income_vs_spend_clarifications.md`](docs/income_vs_spend_clarifications.md)
+> for how income vs expense reconciles.
 
 ---
 

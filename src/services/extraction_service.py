@@ -20,7 +20,9 @@ from src.parsers.hdfc_excel_parser import HdfcExcelParser
 from src.parsers.hdfc_pdf_parser import HdfcPdfParser
 from src.parsers.icici_excel_parser import IciciExcelParser
 from src.parsers.icici_pdf_parser import IciciPdfParser
+from src.parsers.paytm_excel_parser import PaytmExcelParser
 from src.services.file_discovery import DiscoveredFile, discover_files
+from src.services.paytm_merge import merge_paytm
 from src.utils.logging_setup import get_logger
 
 
@@ -32,6 +34,7 @@ def build_parser_registry() -> list[BaseParser]:
     current inputs are .xls.
     """
     return [
+        PaytmExcelParser(),   # claim Paytm .xlsx before the bank parsers
         IciciExcelParser(),
         HdfcExcelParser(),
         IciciPdfParser(),
@@ -78,6 +81,11 @@ def extract_all(source_dir: Path | str = "all_bank_statements") -> dict:
     else:
         combined = pd.DataFrame(columns=PARSER_OUTPUT_COLUMNS)
 
+    # Fold Paytm rows into the bank rows: drop those already in a bank statement
+    # (matched by UPI Ref No.), enrich the matched bank row's counterparty, and
+    # keep Paytm-only rows (PNB/SBI/credit-card/UPI-Lite).
+    combined, paytm_report = merge_paytm(combined, logger)
+
     overall_gaps = _overall_coverage_gaps(combined)
     if overall_gaps:
         logger.warning(
@@ -96,6 +104,7 @@ def extract_all(source_dir: Path | str = "all_bank_statements") -> dict:
         "transactions": combined,
         "reports": clean_reports,
         "overall_gaps": overall_gaps,
+        "paytm_merge": paytm_report,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
     }
 

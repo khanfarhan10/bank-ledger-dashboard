@@ -8,7 +8,7 @@
 #   people:
 #     <key>:
 #       display_name: "Readable Name"
-#       related_flag: benazir | nazrana   # which summary bucket this feeds
+#       related_flag: benazir | nazrana | mother | sister
 #       aliases: [ list of lowercase substrings to look for ]
 
 people:
@@ -23,9 +23,16 @@ people:
       - "rahman benazir"
       - "b rahaman"
       - "b rahman"
+      - "benazir.rahaman.3-3@okhdfcbank"
+      - "benazir.rahaman.3-4@okaxis"
+      - "benazir.rahaman.3-3@okicici"
+      - "benazir.rahaman.3-5@okicici"
+      - "8617663869@paytm"
+      - "8617663869@ptyes"
+      - "8617663869"
 
   nazrana:
-    display_name: "Nazrana / Najrana (mother)"
+    display_name: "Nazrana / Najrana (Benazir's mother)"
     related_flag: nazrana
     aliases:
       - "nazrana"
@@ -34,3 +41,22 @@ people:
       - "najrana khatun"
       - "nazrana khatoon"
       - "najrana khatoon"
+
+  husna_ara_bano:
+    display_name: "Husna Ara Bano (Mother)"
+    related_flag: mother
+    aliases:
+      - "husna ara bano"
+      - "husna"
+      - "husnaarabano"
+      - "husna ara"
+      - "9852378779"
+
+  zarinne:
+    display_name: "Zarinne Fatma Khan (Sister)"
+    related_flag: sister
+    aliases:
+      - "zarinne"
+      - "zarinne fatma"
+      - "zarinne fatma khan"
+      - "9471351129"

@@ -75,8 +75,12 @@ _EMPLOYERS = r"koireader|primus global|primus-global"
 # (category, regex, human_reason, direction)  — direction None = any.
 # Tried in order; first match wins. RECEIVED-gated income rules come first.
 CATEGORY_RULES: list[tuple[str, str, str, str | None]] = [
+    # --- accident insurance claim (credit, highest among income) ---
+    ("accident_insurance_claim", r"icici lombard|lombard.*claim|accident claim|health claim", "ICICI Lombard / accident insurance claim credit.", "RECEIVED"),
+
     # --- income (credits) ---
-    ("salary_or_income", _EMPLOYERS, "Employer credit (KoiReader / Primus Global).", "RECEIVED"),
+    ("salary_or_income", r"koireader", "KoiReader Technologies salary credit.", "RECEIVED"),
+    ("freelance_income", r"primus global|primus-global|primus partners", "Primus Global freelancing income.", "RECEIVED"),
     ("salary_or_income", r"salary|payroll|sal cr|sal credit", "Narration mentions salary/payroll on a credit.", "RECEIVED"),
     ("it_refund", r"incometaxrefund|income tax refund|it refund|itr.?refund|refund.*income tax|cbdt refund|tax refund", "Income-tax refund credit.", "RECEIVED"),
     ("interest_income", r"int\.pd|interest paid|int credit|saving.*interest|fd interest|interest on", "Bank/FD interest credit.", "RECEIVED"),
@@ -89,6 +93,10 @@ CATEGORY_RULES: list[tuple[str, str, str, str | None]] = [
     # --- investments (debits, saved not spent) ---
     ("investment", r"groww|zerodha|mutual fund|\bsip\b|sovereign gold|gold bond|\bsgb\b|ft-sgb|\bppf\b|public provident|\bnps\b|elss|bse star|nse mf|camsonline|kfintech|indmoney|kuvera|upstox|angel one|5paisa|icicidirect|trf to fd|recurring deposit",
      "Investment / savings outflow.", "PAID_OUT"),
+
+    # --- earmarked life events / studies / recovery (keyword, date-agnostic) ---
+    ("law_studies", r"vbu|vinoba bhave|vinobha bhave|\bllb\b|law college|law university", "Vinoba Bhave University / my law studies.", None),
+    ("physio_therapist_hamid", r"\bhamid\b", "Hamid — physiotherapist (post-accident).", None),
 
     # --- insurance / loans ---
     ("insurance", r"kotak life|life insurance|insurance|\blic\b|policy|premium|term plan|hdfc life|max life|sbi life|star health|hdfc ergo|bajaj allianz", "Insurance premium / policy.", None),
@@ -105,6 +113,10 @@ CATEGORY_RULES: list[tuple[str, str, str, str | None]] = [
     ("entertainment", _ENTERTAINMENT, "Entertainment / subscriptions.", None),
     ("education", _EDUCATION, "Education / courses.", None),
     ("medical", _MEDICAL, "Medical / pharmacy / healthcare.", None),
+
+    # --- bill payments (HDFC NetBanking BillPay to a registered biller:
+    #     utility / mobile / credit card — NOT a self-transfer) ---
+    ("bill_payment", r"ib billpay|\bbillpay\b|bill pay|bbps|bharat bill", "Bill payment via NetBanking BillPay (utility / mobile / card).", None),
 
     # --- money movement ---
     ("cash_withdrawal", r"cash wdl|cash withdrawal|\bnwd\b|\batm\b|nfs/|atw/", "Cash / ATM withdrawal.", None),

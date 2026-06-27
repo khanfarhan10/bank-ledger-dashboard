@@ -58,12 +58,16 @@ SCHEMA_COLUMNS: list[str] = [
     "confidence",              # simple 0..1 hint, never a guarantee
     # --- boolean flags ---
     "is_benazir_related",
-    "is_nazrana_related",
+    "is_nazrana_related",      # Benazir's mother
+    "is_mother_related",       # my mother (Husna Ara Bano)
+    "is_sister_related",       # my sister (Zarinne)
     "is_large_payment",
     "is_self_transfer",        # money between the user's own accounts (excluded from totals)
     "is_income",               # real income (salary, refund, interest, ...)
     "is_investment",           # money invested/saved (not an expense)
+    "is_family_savings",       # money to my mother/sister kept as deposits (not expense)
     "is_duplicate",            # exact duplicate from overlapping exports (excluded)
+    "is_approved",             # user has confirmed/edited the classification
     "is_manual_entry",
     "is_linked_entry",
     # --- manual review (merged in from the decision store) ---

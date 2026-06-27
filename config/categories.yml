@@ -8,16 +8,29 @@
 # to any particular name. Classification is rule-based and transparent.
 
 categories:
-  # people
+  # Benazir (girlfriend) + her mother Nazrana — the relationship ledger
   - benazir_payments
-  - nazrana_payments
   - benazir_repayment
+  - benazir_iphone          # iPhone 16 Pro Max bought for Benazir
+  - benazir_laptop          # laptop bought for Benazir
+  - zara_iphone             # iPhone 16 for Zara (Benazir's sister) — my contribution
+  - benazir_loan_repayment  # Axis loan taken for Benazir, repaid by me
+  - benazir_studies         # Buni's studies / study material
+  - nazrana_payments
+  # my family — mother (Husna Ara Bano) + sister (Zarinne). Treated as
+  # self-investment (FDs in their name) with a manual saved/spent override.
+  - mother_payments
+  - sister_payments
+  - zarinne_studies         # money sent to sister for her education
+  - family_savings
   - family_transfer
   # income (real money in)
   - salary_or_income
+  - freelance_income
   - it_refund
   - interest_income
   - cashback_reward
+  - accident_insurance_claim # ICICI Lombard accident claim (credit)
   # own-money movement (not income / not expense)
   - self_transfer
   - refund_reversal
@@ -26,6 +39,17 @@ categories:
   # obligations
   - insurance
   - loan_or_emi
+  # accident (08 Feb 2024) + recovery
+  - accident_medical
+  - accident_surgery
+  - accident_medicine
+  - accident_hospital
+  - accident_recovery
+  - physio_therapist_hamid
+  # life events
+  - marriage_expense        # Zarinne's marriage (~29 Apr 2023)
+  # my education
+  - law_studies             # VBU / Vinoba Bhave University (my own)
   # everyday spend
   - food
   - groceries
@@ -36,15 +60,31 @@ categories:
   - entertainment
   - education
   - medical
+  - rent
   - cash_withdrawal
+  - bill_payment
   - bank_charges
   - large_expenses
+  - historic_evidence       # documented but NOT billed (avoids double counting)
   - personal_expense
   - family_expense
   - transfer
   # fallback
   - unknown
   - review_later
+
+# Categories that are NOT real consumption/expense (savings, internal moves,
+# money to own family kept as deposits). Excluded from the "real expense" total.
+non_expense_categories:
+  - self_transfer
+  - refund_reversal
+  - investment
+  - investment_redemption
+  - mother_payments
+  - sister_payments
+  - family_savings
+  - accident_insurance_claim
+  - historic_evidence       # loan mechanics — billed once elsewhere, not here
 
 # Manual review statuses available as flags on each transaction.
 review_statuses:

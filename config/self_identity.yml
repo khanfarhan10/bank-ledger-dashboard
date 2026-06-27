@@ -27,6 +27,8 @@ own_phone_numbers:
 own_upi_handles:
   - "fhk.main@"
   - "fhk.main"
+  - "farhan-65@paytm"
+  - "farhan-65@"
 
 # Own bank account numbers (full or distinctive fragments).
 own_account_numbers:
@@ -48,10 +50,12 @@ self_transfer_patterns:
   - "trf to fd"                  # transfer to fixed deposit (creation)
   - "trf from fd"                # fixed deposit maturity back to account
   - "\\bfd no\\.?"               # "FD no. 048913..." references
-  - "cc billpay/self"            # own credit-card autopay (ICICI)
+  - "cc billpay/self"            # own credit-card autopay (ICICI, explicit /Self)
   - "billpay/self"
-  - "ib billpay dr"              # own credit-card bill (HDFC NetBanking)
   - "clg/.*farhan hai khan"      # own cheque clearing across own banks
+  # NOTE: "IB BILLPAY DR" is NOT a self-transfer — it's HDFC NetBanking BillPay
+  # for a registered biller (utility / mobile / credit card). Classified as
+  # bill_payment instead so it isn't silently excluded from spend.
 
 # 048913... is the FD-account series tied to the ICICI savings account.
 own_account_prefixes:

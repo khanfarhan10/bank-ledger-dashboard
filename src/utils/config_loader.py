@@ -52,6 +52,12 @@ def load_review_statuses(config_dir: Path | str = CONFIG_DIR) -> list[str]:
     return list(data.get("review_statuses", []) or [])
 
 
+def load_non_expense_categories(config_dir: Path | str = CONFIG_DIR) -> list[str]:
+    """Categories that are NOT real consumption (savings/internal/family deposits)."""
+    data = load_yaml(Path(config_dir) / "categories.yml")
+    return list(data.get("non_expense_categories", []) or [])
+
+
 def load_threshold(config_dir: Path | str = CONFIG_DIR, default: float = 3000.0) -> float:
     """Return the configured large-payment threshold (file value only)."""
     data = load_yaml(Path(config_dir) / "thresholds.yml")

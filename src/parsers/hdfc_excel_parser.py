@@ -36,12 +36,18 @@ class HdfcExcelParser(BaseParser):
     supported_extensions = [".xls", ".xlsx"]
 
     def can_parse(self, path: Path) -> bool:
-        """Match HDFC by folder name or the 'Acct Statement' filename."""
+        """Match HDFC by folder name or the 'Acct Statement' filename.
+
+        Explicitly declines Paytm exports (whose filename also contains
+        'statement') so the dedicated Paytm parser handles them.
+        """
         if path.suffix.lower() not in self.supported_extensions:
             return False
         name = path.name.lower()
         folder = path.parent.name.lower()
-        return "hdfc" in folder or "statement" in name and "optransaction" not in name
+        if "paytm" in name or "paytm" in folder:
+            return False
+        return "hdfc" in folder or ("statement" in name and "optransaction" not in name)
 
     def parse(self, path: Path) -> ParseResult:
         try:
