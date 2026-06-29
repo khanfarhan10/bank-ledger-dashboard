@@ -390,6 +390,71 @@ def fmt_amt(x) -> str:
         return str(x)
 
 
+def _s(v) -> str:
+    """NA/None-safe string ('' for missing) — avoids 'pd.NA or ...' ambiguity."""
+    try:
+        if v is None or pd.isna(v):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(v)
+
+
+def _member_dict(r, tid, label, historic, off) -> dict:
+    """One subchild transaction, including bank + Paytm reference details."""
+    bank_ref = _s(r.get("raw_description"))
+    paytm_ref = _s(r.get("counterparty_name"))   # Paytm payee folded in via RRN dedup
+    rrn = _s(r.get("reference_number"))
+    return {
+        "transaction_id": tid, "transaction_date": r["transaction_date"],
+        "source_bank": r["source_bank"], "description": r["description"],
+        "raw_description": bank_ref, "amount": float(r["amount"]),
+        "direction": r["direction"], "member_label": label,
+        "historic": bool(historic), "is_approved": bool(r.get("is_approved")),
+        "manual_comment": _na(r.get("manual_comment")),
+        "bank_ref": bank_ref, "paytm_ref": paytm_ref, "reference_number": rrn,
+        "offset": bool(off), "offset_partner": (off or {}).get("partner_id"),
+        "offset_note": (off or {}).get("note"),
+    }
+
+
+def _na(v):
+    try:
+        return None if v is None or pd.isna(v) else v
+    except (TypeError, ValueError):
+        return v
+
+
+def _group_children(rows: list) -> list:
+    """Group member rows by their label into CHILD buckets (parent→child→subchild).
+
+    Each child carries a subtotal (paid/received/net) over its non-historic,
+    non-offset subchildren. Children are ordered latest-first.
+    """
+    groups, order = {}, []
+    for r in rows:
+        key = r.get("child_group") or r.get("member_label") or "—"
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(r)
+    children = []
+    for key in order:
+        members = groups[key]
+        paid = sum(m["amount"] for m in members if m["direction"] == "PAID_OUT" and not m["historic"] and not m["offset"])
+        recv = sum(m["amount"] for m in members if m["direction"] == "RECEIVED" and not m["historic"] and not m["offset"])
+        dts = [str(m["transaction_date"]) for m in members if m["transaction_date"]]
+        children.append({
+            "label": key, "count": len(members),
+            "paid": float(paid), "received": float(recv), "net": float(paid - recv),
+            "base_date": (min(dts) if dts else None),
+            "all_historic": all(m["historic"] for m in members),
+            "members": members,
+        })
+    children.sort(key=lambda c: c["base_date"] or "", reverse=True)
+    return children
+
+
 def benazir_analytics(df: pd.DataFrame, store=None) -> dict:
     """Benazir ledger organised as MASTERS (SUMMARY-A, B, ...) + general.
 
@@ -410,7 +475,8 @@ def benazir_analytics(df: pd.DataFrame, store=None) -> dict:
     member_of = {}
     if not members_df.empty:
         for _, mm in members_df.iterrows():
-            member_of[mm["transaction_id"]] = (mm["code"], mm["label"], bool(mm["historic"]))
+            cg = mm["child_group"] if "child_group" in members_df.columns else ""
+            member_of[mm["transaction_id"]] = (mm["code"], mm["label"], bool(mm["historic"]), _s(cg))
 
     by_txn = {r["transaction_id"]: r for _, r in real.iterrows()}
     offsets = _detect_offsets(real)   # to-and-fro pairs, crossed out
@@ -427,7 +493,7 @@ def benazir_analytics(df: pd.DataFrame, store=None) -> dict:
             r = by_txn.get(tid)
             if r is None:
                 continue
-            _, label, historic = member_of[tid]
+            _, label, historic, child_group = member_of[tid]
             amt = float(r["amount"])
             off = offsets.get(tid)
             # Offset (to-and-fro) and historic rows don't count toward the net.
@@ -437,17 +503,11 @@ def benazir_analytics(df: pd.DataFrame, store=None) -> dict:
                 elif r["direction"] == "RECEIVED":
                     received += amt
             dates.append(str(r["transaction_date"]))
-            rows.append({
-                "transaction_id": tid, "transaction_date": r["transaction_date"],
-                "source_bank": r["source_bank"], "description": r["description"],
-                "raw_description": r.get("raw_description"), "amount": amt,
-                "direction": r["direction"], "member_label": label,
-                "historic": historic, "is_approved": bool(r.get("is_approved")),
-                "manual_comment": r.get("manual_comment"),
-                "offset": bool(off), "offset_partner": (off or {}).get("partner_id"),
-                "offset_note": (off or {}).get("note"),
-            })
+            md = _member_dict(r, tid, label, historic, off)
+            md["child_group"] = child_group or label or "Other"
+            rows.append(md)
         rows.sort(key=lambda x: str(x["transaction_date"]), reverse=True)  # latest first
+        children = _group_children(rows)
         declared = mrow["summary_amount"]
         net = float(declared) if pd.notna(declared) and declared is not None else (paid - received)
         masters.append({
@@ -455,7 +515,7 @@ def benazir_analytics(df: pd.DataFrame, store=None) -> dict:
             "base_date": mrow["base_date"] or (min(dates) if dates else None),
             "kind": mrow["kind"], "net": net, "paid": paid, "received": received,
             "count": len(rows), "declared": pd.notna(declared) and declared is not None,
-            "members": rows,
+            "members": rows, "children": children,
         })
 
     # General = Benazir/Nazrana-related, not in any master, not historic.
@@ -469,23 +529,14 @@ def benazir_analytics(df: pd.DataFrame, store=None) -> dict:
     gmembers = []
     for _, r in rel.sort_values("amount", ascending=False).iterrows():
         off = offsets.get(r["transaction_id"])
-        gmembers.append({
-            "transaction_id": r["transaction_id"], "transaction_date": r["transaction_date"],
-            "source_bank": r["source_bank"], "description": r["description"],
-            "raw_description": r.get("raw_description"), "amount": float(r["amount"]),
-            "direction": r["direction"], "member_label": "",
-            "historic": False, "is_approved": bool(r.get("is_approved")),
-            "manual_comment": r.get("manual_comment"),
-            "offset": bool(off), "offset_partner": (off or {}).get("partner_id"),
-            "offset_note": (off or {}).get("note"),
-        })
+        gmembers.append(_member_dict(r, r["transaction_id"], "", False, off))
     general = {
         "code": "GEN", "title": "General payments (uncategorised)",
         "detail": "Small / one-off payments to Benazir not part of a master. "
                   f"{sum(1 for m in gmembers if m['offset'])} crossed-out rows are to-and-fro (resolved).",
         "base_date": None, "kind": "expense",
         "net": gpaid - grecv, "paid": gpaid, "received": grecv,
-        "count": int(len(rel)), "declared": False, "members": gmembers,
+        "count": int(len(rel)), "declared": False, "members": gmembers, "children": [],
     }
 
     billed = sum(m["net"] for m in masters) + general["net"]

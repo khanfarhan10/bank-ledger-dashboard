@@ -12,7 +12,6 @@ rows:
   - { date: 2023-10-18, amount: 700,   reason: "Don't remember" }
   - { date: 2023-10-28, amount: 500,   reason: "Don't remember" }
   - { date: 2024-02-16, amount: 3000,  reason: "Don't remember" }
-  - { date: 2024-02-21, amount: 10000, reason: "Bennu travelling cost (given back)" }
   - { date: 2024-07-03, amount: 4000,  reason: "Don't remember" }
   - { date: 2024-07-22, amount: 1300,  reason: "Don't remember" }
   - { date: 2024-08-24, amount: 10000, reason: "Visited Kolkata (roaming around)" }
@@ -23,11 +22,9 @@ rows:
   - { date: 2024-12-22, amount: 5000,  reason: "" }
   - { date: 2025-04-21, amount: 1100,  reason: "" }
   - { date: 2025-04-22, amount: 1500,  reason: "" }
-  - { date: 2025-04-25, amount: 2770,  reason: "Gift" }
+  - { date: 2025-04-25, amount: 2770,  reason: "" }
   - { date: 2025-05-28, amount: 4000,  reason: "" }
   - { date: 2025-06-19, amount: 1000,  reason: "" }
-  - { date: 2025-07-31, amount: 12500, reason: "Insurance KOTAK loss share — contingent Sep 40000, loss 25000 (/2 as ~equal bad decision)" }
-  - { date: 2025-07-31, amount: 8750,  reason: "Loan interest (17500) (/2 as ~equal bad decision)" }
   - { date: 2025-09-06, amount: 8000,  reason: "Rent deficit?" }
   - { date: 2025-09-21, amount: 9000,  reason: "" }
   - { date: 2025-10-05, amount: 5000,  reason: "" }

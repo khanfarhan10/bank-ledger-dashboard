@@ -156,11 +156,17 @@ class DecisionStore:
                     code           TEXT,
                     transaction_id TEXT,
                     label          TEXT,
+                    child_group    TEXT,
                     historic       INTEGER DEFAULT 0,
                     PRIMARY KEY (code, transaction_id)
                 );
                 """
             )
+            # Migration for DBs created before child_group existed.
+            try:
+                conn.execute("ALTER TABLE master_members ADD COLUMN child_group TEXT")
+            except sqlite3.OperationalError:
+                pass
         get_logger().info("Decision store ready at %s", self.db_path)
 
     # -- transaction decisions ------------------------------------------------
@@ -493,19 +499,33 @@ class DecisionStore:
         with self._connect() as conn:
             return pd.read_sql_query("SELECT * FROM benazir_masters ORDER BY sort_order", conn)
 
-    def set_master_member(self, code, transaction_id, label="", historic=False) -> None:
+    def set_master_member(self, code, transaction_id, label="", historic=False, child_group="") -> None:
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO master_members (code, transaction_id, label, historic)
-                   VALUES (?, ?, ?, ?)
+                """INSERT INTO master_members (code, transaction_id, label, child_group, historic)
+                   VALUES (?, ?, ?, ?, ?)
                    ON CONFLICT(code, transaction_id) DO UPDATE SET
-                     label=excluded.label, historic=excluded.historic""",
-                (code, transaction_id, label, 1 if historic else 0),
+                     label=excluded.label, child_group=excluded.child_group,
+                     historic=excluded.historic""",
+                (code, transaction_id, label, child_group, 1 if historic else 0),
             )
 
     def clear_master_members(self, code) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM master_members WHERE code = ?", (code,))
+
+    def delete_master(self, code) -> None:
+        """Remove a master header and its member links (used to prune masters
+        that were dropped from the config on re-seed)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM master_members WHERE code = ?", (code,))
+            conn.execute("DELETE FROM benazir_masters WHERE code = ?", (code,))
+        self._audit("benazir_master", code, "delete", "", "", "reseed prune")
+
+    def all_master_codes(self) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT code FROM benazir_masters").fetchall()
+        return [r[0] for r in rows]
 
     def get_master_members_df(self) -> pd.DataFrame:
         with self._connect() as conn:

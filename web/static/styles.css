@@ -203,6 +203,14 @@ canvas { max-height: 240px; }
 .member-table .nowrap { white-space: nowrap; }
 .member-table tr.hist-row { opacity: 0.55; font-style: italic; }
 .member-table tr.offset-row { opacity: 0.6; }
+.member-table tr.child-head { cursor: pointer; background: var(--panel-2); }
+.member-table tr.child-head:hover { background: var(--border); }
+.member-table tr.child-head td { padding: 9px 8px; border-bottom: 1px solid var(--border); }
+.member-table tr.child-head .caret { display: inline-block; transition: transform 0.15s; color: var(--accent); }
+.member-table tr.child-head.collapsed .caret { transform: rotate(-90deg); }
+.member-table tr.subchild td:first-child { padding-left: 22px; }
+.member-table tr.subchild td:nth-child(3) { color: var(--muted); }
+.member-table tr.hidden { display: none; }
 .member-table .strike { text-decoration: line-through; text-decoration-color: var(--red); }
 .tag-chip.resolved { background: rgba(46, 204, 113, 0.12); color: var(--green); border-color: rgba(46,204,113,0.3); }
 .master-edit { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
@@ -220,3 +228,41 @@ canvas { max-height: 240px; }
 .cell-pos { color: var(--green); font-variant-numeric: tabular-nums; }
 .cell-neg { color: var(--red); font-variant-numeric: tabular-nums; }
 .tag-chip { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; margin: 1px; font-size: 11px; color: var(--muted); }
+
+/* ---- Figuring Out Benazir Expenses ---- */
+.fig-title { font-weight: 700; font-size: 15px; }
+.fig-card { padding: 0; }
+.fig-head { display: grid; grid-template-columns: 150px 1fr auto auto; gap: 12px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.fig-amt { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fig-when { font-size: 13px; }
+.fig-sig { font-size: 11px; }
+.fig-ref { padding: 6px 16px 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fig-body { display: grid; grid-template-columns: 1fr 280px; gap: 14px; padding: 12px 16px 16px; }
+.fig-chatwrap { min-width: 0; }
+.fig-window { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; margin-bottom: 6px; }
+.fig-window .fig-days { width: 56px; padding: 4px 6px; }
+.fig-windowstatus { margin-left: auto; font-size: 11px; }
+.fig-chat { max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--bg); }
+.fig-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.fig-actions .btn { width: 100%; box-sizing: border-box; margin-left: 0; }
+.chat-day { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 4px; padding: 3px 8px; border-radius: 6px; border-left: 3px solid var(--border); background: var(--panel-2); }
+.chat-day .chat-date { color: var(--text); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chat-rel { font-size: 10px; font-weight: 700; letter-spacing: 0.4px; }
+.chat-day.rel-back { border-left-color: var(--accent-2); }
+.chat-day.rel-fwd { border-left-color: var(--green); }
+.chat-day.rel-same { border-left-color: var(--amber); background: rgba(255, 176, 32, 0.10); }
+.chat-rel.rel-back { color: var(--accent-2); }
+.chat-rel.rel-fwd { color: var(--green); }
+.chat-rel.rel-same { color: var(--amber); }
+.chat-line { display: grid; grid-template-columns: 42px 64px 1fr; gap: 6px; padding: 2px 4px; border-radius: 6px; font-size: 12px; line-height: 1.4; }
+.chat-line .chat-t { color: var(--muted); font-size: 10px; }
+.chat-line .chat-who { font-size: 10px; font-weight: 700; }
+.chat-line.her .chat-who { color: var(--accent-2); }
+.chat-line.me .chat-who { color: var(--accent); }
+.chat-line.money { background: rgba(79, 140, 255, 0.07); }
+.chat-line.amt-hit { background: rgba(255, 176, 32, 0.16); outline: 1px solid rgba(255,176,32,0.35); }
+.chat-amt-key { color: var(--amber); font-weight: 700; font-size: 10px; }
+.chat-money-key { color: var(--accent); font-weight: 600; }
+.chat-empty { color: var(--muted); font-size: 12px; padding: 8px; text-align: center; }
+.prompt-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; max-height: 360px; overflow-y: auto; color: var(--text); font-family: ui-monospace, "Cascadia Code", Consolas, monospace; margin-bottom: 10px; }
+@media (max-width: 900px) { .fig-body { grid-template-columns: 1fr; } .fig-head { grid-template-columns: 1fr 1fr; } }

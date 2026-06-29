@@ -145,9 +145,11 @@ def extraction() -> dict:
 @app.get("/api/benazir")
 def benazir() -> dict:
     data = analytics.benazir_analytics(STATE.ledger(), STATE.store)
-    # JSON-safe the nested member dicts.
+    # JSON-safe the nested member dicts (flat members + child subchildren).
     for m in data.get("masters", []):
         m["members"] = _clean(m.get("members", []))
+        for ch in m.get("children", []):
+            ch["members"] = _clean(ch.get("members", []))
     return data
 
 
@@ -183,28 +185,103 @@ def export_benazir_csv():
     w.writerow(["Ref", "Date", "Type", "Title / Description", "Paid (₹)",
                 "Received (₹)", "Net (₹)", "Historic", "Note"])
     for m in data.get("masters", []):
+        # PARENT
         w.writerow([
             f"SUMMARY-{m['code']}", sv(m.get("base_date")), "MASTER",
             sv(m.get("title")), f"{m.get('paid', 0):.0f}",
             f"{m.get('received', 0):.0f}", f"{m.get('net', 0):.0f}",
             "", sv(m.get("detail")),
         ])
-        for i, mem in enumerate(_clean(m.get("members", [])), start=1):
-            amt = mem.get("amount") or 0
-            paid = amt if mem.get("direction") == "PAID_OUT" else 0
-            recv = amt if mem.get("direction") == "RECEIVED" else 0
-            status = "historic" if mem.get("historic") else ("resolved (to-and-fro)" if mem.get("offset") else "")
-            note = sv(mem.get("offset_note")) or sv(mem.get("manual_comment"))
-            w.writerow([
-                f"{m['code']}.{i}", sv(mem.get("transaction_date")), "detail",
-                sv(mem.get("member_label")) or sv(mem.get("description")),
-                f"{paid:.0f}", f"{recv:.0f}", "", status, note,
-            ])
+        children = m.get("children") or [{"label": "", "members": m.get("members", []),
+                                          "paid": m.get("paid", 0), "received": m.get("received", 0),
+                                          "net": m.get("net", 0), "base_date": m.get("base_date")}]
+        for ci, ch in enumerate(children, start=1):
+            cmembers = _clean(ch.get("members", []))
+            multi = len(cmembers) > 1
+            if multi:  # CHILD subtotal row only when it groups >1 subchild
+                w.writerow([
+                    f"{m['code']}.{ci}", sv(ch.get("base_date")), "group",
+                    sv(ch.get("label")), f"{ch.get('paid', 0):.0f}",
+                    f"{ch.get('received', 0):.0f}", f"{ch.get('net', 0):.0f}", "", "",
+                ])
+            for si, mem in enumerate(cmembers, start=1):
+                amt = mem.get("amount") or 0
+                paid = amt if mem.get("direction") == "PAID_OUT" else 0
+                recv = amt if mem.get("direction") == "RECEIVED" else 0
+                ref = f"{m['code']}.{ci}.{si}" if multi else f"{m['code']}.{ci}"
+                status = "historic" if mem.get("historic") else ("resolved (to-and-fro)" if mem.get("offset") else "")
+                note = sv(mem.get("offset_note")) or sv(mem.get("manual_comment"))
+                detail = (sv(mem.get("description")) + "  |  " + sv(mem.get("raw_description"))).strip(" |")
+                w.writerow([
+                    ref, sv(mem.get("transaction_date")), "subchild",
+                    detail, f"{paid:.0f}", f"{recv:.0f}", "", status, note,
+                ])
     buf.seek(0)
     return StreamingResponse(
         iter([buf.getvalue()]), media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=benazir_ledger.csv"},
     )
+
+
+# --- Figuring Out Benazir Expenses (chat context per general payment) -------
+
+@app.get("/api/benazir/figuring")
+def benazir_figuring(days: int = 5) -> dict:
+    """Each uncategorised General payment to Benazir, with the WhatsApp chat
+    around it (±`days`), money-signal and exact-amount lines flagged — so the
+    reason for each payment can be identified from what was actually said."""
+    from src.services import chat_context
+
+    days = max(1, min(int(days), 30))
+    data = analytics.benazir_analytics(STATE.ledger(), STATE.store)
+    gen = next((m for m in data.get("masters", []) if m.get("code") == "GEN"), None)
+    items = []
+    if gen:
+        members = [m for m in gen.get("members", []) if not m.get("offset")]
+        # Highest amount first (the payments most worth identifying).
+        members.sort(key=lambda m: float(m.get("amount") or 0), reverse=True)
+        for mem in members:
+            ctx = chat_context.context_for(
+                mem.get("transaction_date"), mem.get("amount"), days=days
+            )
+            note = mem.get("manual_comment")
+            items.append({
+                "transaction_id": mem.get("transaction_id"),
+                "transaction_date": mem.get("transaction_date"),
+                "amount": mem.get("amount"),
+                "direction": mem.get("direction"),
+                "source_bank": mem.get("source_bank"),
+                "bank_ref": mem.get("bank_ref"),
+                "paytm_ref": mem.get("paytm_ref"),
+                "reference_number": mem.get("reference_number"),
+                "note": note,
+                "needs_reason": not (note and str(note).strip()
+                                     and "remember" not in str(note).lower()),
+                "is_approved": bool(mem.get("is_approved")),
+                "money_count": ctx["money_count"],
+                "amount_hits": ctx["amount_hits"],
+                "chat": ctx["messages"],
+            })
+    return {
+        "days": days, "count": len(items),
+        "unresolved": sum(1 for i in items if i["needs_reason"]),
+        "chat": chat_context.chat_span(),
+        "items": _clean(items),
+    }
+
+
+@app.get("/api/benazir/chat-window")
+def benazir_chat_window(date: str, amount: float = 0.0, days: int = 5) -> dict:
+    """Chat around a SINGLE payment for a custom window — lets the user widen
+    just one payment's ±days without reloading the whole page."""
+    from src.services import chat_context
+
+    days = max(1, min(int(days), 60))
+    ctx = chat_context.context_for(date, amount, days=days)
+    return {
+        "days": days, "money_count": ctx["money_count"],
+        "amount_hits": ctx["amount_hits"], "chat": _clean(ctx["messages"]),
+    }
 
 
 # --- search (generic filter page) -------------------------------------------

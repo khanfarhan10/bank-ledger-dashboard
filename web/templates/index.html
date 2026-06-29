@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bank Ledger Dashboard</title>
   <link rel="stylesheet" href="/static/vendor/tabulator_midnight.min.css" />
-  <link rel="stylesheet" href="/static/styles.css?v=6" />
+  <link rel="stylesheet" href="/static/styles.css?v=10" />
 </head>
 <body>
   <header class="topbar">
@@ -19,6 +19,7 @@
     <nav class="tabs" id="tabs">
       <button class="tab active" data-page="ledger">Ledger</button>
       <button class="tab" data-page="benazir">Benazir</button>
+      <button class="tab" data-page="figuring">Figuring Out</button>
       <button class="tab" data-page="search">Search</button>
       <button class="tab" data-page="family">Family</button>
       <button class="tab" data-page="investments">Investments</button>
@@ -61,6 +62,20 @@
       </div>
       <p class="hint">Each <b>master</b> (SUMMARY-A, B, …) is one logical expense with its backing records (latest first). <i>Historic</i> rows are evidence only and don't add to the net. Click a master header to edit its title / details / base date. Confirm ✓ or deny ✗ each record.</p>
       <div id="benazirMasters"></div>
+    </section>
+
+    <!-- Figuring Out Benazir Expenses -->
+    <section class="page" id="page-figuring">
+      <div class="toolbar">
+        <span class="fig-title">🔎 Figuring Out Benazir Expenses</span>
+        <label class="chk">± days <input id="figDays" class="input" type="number" min="1" max="30" value="5" /></label>
+        <button id="figReload" class="btn">Reload</button>
+        <label class="chk"><input type="checkbox" id="figUnresolvedOnly" checked /> Only un-identified</label>
+        <span id="figMeta" class="hint"></span>
+      </div>
+      <p class="hint"><b>Highest amount first.</b> Each <b>uncategorised</b> payment to Benazir is paired with the WhatsApp chat around it. Every chat date is labelled <span class="chat-rel rel-back">◀ BACKWARD</span> / <span class="chat-rel rel-same">● SAME DAY</span> / <span class="chat-rel rel-fwd">▶ FORWARD</span> relative to the payment. The ± days at the top sets the default window; widen <b>just one payment</b> using its own <b>±days → Apply</b>. <span class="chat-money-key">Money words</span> and <span class="chat-amt-key">exact-amount</span> lines are highlighted. Type a reason and press <b>Save</b> to classify it.</p>
+      <div id="figList"></div>
+      <div class="panel" id="figPromptPanel"></div>
     </section>
 
     <!-- Search -->
@@ -192,6 +207,6 @@
 
   <script src="/static/vendor/tabulator.min.js"></script>
   <script src="/static/vendor/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=6"></script>
+  <script src="/static/app.js?v=10"></script>
 </body>
 </html>

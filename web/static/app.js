@@ -188,25 +188,47 @@ loaders.benazir = async function () {
   (b.masters || []).forEach((m) => host.appendChild(masterCard(m)));
 };
 
+function subchildRow(mem, key, indented) {
+  const amt = `<span class="${mem.direction === "RECEIVED" ? "cell-pos" : "cell-neg"}">${fmtINR(mem.amount)}</span>`;
+  const badge = mem.is_approved ? '<span class="badge ok">✓</span>' : '<span class="badge warn">⚠</span>';
+  const acts = `<span class="act ok" data-confirm="${mem.transaction_id}">✓</span> <span class="act no" data-deny="${mem.transaction_id}">✗</span>`;
+  const cls = [mem.historic ? "hist-row" : "", mem.offset ? "offset-row" : "", indented ? "subchild" : ""].join(" ").trim();
+  // hover tooltip: show BOTH the bank narration and the Paytm payee + UPI ref
+  const tip = `Bank entry: ${mem.bank_ref || "—"}\nPaytm entry: ${mem.paytm_ref || "—"}\nUPI Ref: ${mem.reference_number || "—"}`;
+  const tags = (mem.historic ? ' <span class="tag-chip">historic</span>' : "")
+    + (mem.offset ? ` <span class="tag-chip resolved" title="links to ${mem.offset_partner || ""}">↔ ${escapeHtml(mem.offset_note || "resolved")}</span>` : "")
+    + (mem.paytm_ref ? ' <span class="tag-chip" title="has Paytm + bank reference">⇄ 2 refs</span>' : "");
+  const desc = indented ? (mem.description || "") : (mem.member_label || mem.description || "");
+  return `<tr class="${cls}" data-childof="${key}" title="${escapeHtml(tip)}">
+    <td>${mem.transaction_date || ""}</td>
+    <td class="muted">${escapeHtml(mem.source_bank)}</td>
+    <td><span class="${mem.offset ? "strike" : ""}">${escapeHtml(desc)}</span>${tags}</td>
+    <td class="num"><span class="${mem.offset ? "strike" : ""}">${amt}</span></td>
+    <td>${badge}</td>
+    <td class="nowrap">${acts}</td></tr>`;
+}
+
 function masterCard(m) {
   const wrap = document.createElement("div");
   wrap.className = "section master" + (m.code === "GEN" ? " collapsed" : "");
   const isGen = m.code === "GEN";
-  const rowsHtml = (m.members || []).map((mem) => {
-    const amt = `<span class="${mem.direction === "RECEIVED" ? "cell-pos" : "cell-neg"}">${fmtINR(mem.amount)}</span>`;
-    const badge = mem.is_approved ? '<span class="badge ok">✓</span>' : '<span class="badge warn">⚠</span>';
-    const acts = `<span class="act ok" data-confirm="${mem.transaction_id}">✓</span> <span class="act no" data-deny="${mem.transaction_id}">✗</span>`;
-    const cls = [mem.historic ? "hist-row" : "", mem.offset ? "offset-row" : ""].join(" ").trim();
-    const tags = (mem.historic ? ' <span class="tag-chip">historic</span>' : "")
-      + (mem.offset ? ` <span class="tag-chip resolved" title="links to ${mem.offset_partner || ""}">↔ ${escapeHtml(mem.offset_note || "resolved")}</span>` : "");
-    return `<tr class="${cls}" data-tid="${mem.transaction_id}">
-      <td>${mem.transaction_date || ""}</td>
-      <td class="muted">${escapeHtml(mem.source_bank)}</td>
-      <td title="${escapeHtml(mem.raw_description)}"><span class="${mem.offset ? "strike" : ""}">${escapeHtml(mem.member_label || mem.description)}</span>${tags}</td>
-      <td class="num"><span class="${mem.offset ? "strike" : ""}">${amt}</span></td>
-      <td>${badge}</td>
-      <td class="nowrap">${acts}</td></tr>`;
-  }).join("");
+
+  let bodyRows = "";
+  const children = (m.children && m.children.length) ? m.children : null;
+  if (children) {
+    // Every transaction is an indented subchild under a parent child-group header.
+    children.forEach((ch, ci) => {
+      const key = m.code + "-" + ci;
+      const cnet = `<span class="${ch.net >= 0 ? "cell-neg" : "cell-pos"}">${fmtINR(ch.net)}</span>`;
+      const n = ch.members.length;
+      bodyRows += `<tr class="child-head" data-toggle="${key}">
+        <td colspan="3"><span class="caret">▾</span> <b>${escapeHtml(ch.label)}</b> <span class="muted">· ${n} txn${n > 1 ? "s" : ""}${ch.all_historic ? " · record only" : ""}</span></td>
+        <td class="num">${cnet}</td><td colspan="2" class="muted">subtotal</td></tr>`;
+      ch.members.forEach((mem) => { bodyRows += subchildRow(mem, key, true); });
+    });
+  } else {
+    (m.members || []).forEach((mem) => { bodyRows += subchildRow(mem, m.code, false); });
+  }
 
   wrap.innerHTML = `
     <div class="section-head master-head">
@@ -216,16 +238,20 @@ function masterCard(m) {
     <div class="section-body">
       <div class="master-detail">${escapeHtml(m.detail)}
         ${isGen ? "" : `<button class="btn ghost xs" data-edit="${m.code}">✎ Edit header</button>`}</div>
-      <table class="mini member-table"><thead><tr><th>Date</th><th>Source</th><th>Description</th><th class="num">Amount</th><th>St</th><th>Act</th></tr></thead>
-        <tbody>${rowsHtml || '<tr><td colspan=6 class="muted">No records</td></tr>'}</tbody></table>
+      <table class="mini member-table"><thead><tr><th>Date</th><th>Source</th><th>Description <span class="muted">(hover for refs)</span></th><th class="num">Amount</th><th>St</th><th>Act</th></tr></thead>
+        <tbody>${bodyRows || '<tr><td colspan=6 class="muted">No records</td></tr>'}</tbody></table>
     </div>`;
 
-  // collapse toggle
   wrap.querySelector(".master-head").addEventListener("click", () => wrap.classList.toggle("collapsed"));
-  // confirm / deny per row
+  // child group collapse
+  wrap.querySelectorAll(".child-head").forEach((h) => h.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const key = h.dataset.toggle;
+    h.classList.toggle("collapsed");
+    wrap.querySelectorAll(`tr[data-childof="${key}"]`).forEach((r) => r.classList.toggle("hidden"));
+  }));
   wrap.querySelectorAll("[data-confirm]").forEach((el) => el.addEventListener("click", (e) => { e.stopPropagation(); confirmRow(el.dataset.confirm); }));
   wrap.querySelectorAll("[data-deny]").forEach((el) => el.addEventListener("click", (e) => { e.stopPropagation(); denyRow(el.dataset.deny); }));
-  // edit header
   const editBtn = wrap.querySelector("[data-edit]");
   if (editBtn) editBtn.addEventListener("click", (e) => { e.stopPropagation(); openMasterEditor(wrap, m); });
   return wrap;
@@ -248,6 +274,180 @@ function openMasterEditor(wrap, m) {
     if (amt !== "") payload.summary_amount = parseFloat(amt);
     try { await api("/api/benazir/master", { method: "POST", body: JSON.stringify(payload) }); toast("Master updated"); loaders.benazir(); }
     catch (err) { toast("Save failed: " + err.message, true); }
+  });
+}
+
+// ---------- Figuring Out Benazir Expenses ----------
+const FIG_LLM_PROMPT = `You are a forensic financial analyst. I am recovering money I paid to/for my ex (Benazir), her sister Zara, and her mother Nazrana. Below is ONE bank/UPI payment followed by the WhatsApp messages exchanged around that date.
+
+PAYMENT
+- Date: {{DATE}}
+- Amount: ₹{{AMOUNT}} ({{DIRECTION}})
+- Bank/UPI narration: {{REF}}
+
+CHAT (±{{DAYS}} days; "ME" = me, "BENAZIR" = her):
+{{CHAT}}
+
+TASK
+1. Decide what this specific payment was MOST LIKELY for. Look for: the exact amount or a close number being discussed; words like sent/bheja/bhej diya/paisa/transfer/screenshot/rent/kiraya/deposit/advance/broker/fees/loan/EMI/gold/insurance/laptop/repair/service centre/admission/exam; and any promise to repay.
+2. Output strict JSON only:
+{
+  "category": "rent | rent_shifting_brokerage | studies | laptop_repair | medical | food | travel | gold_loan | insurance | gift_shopping | job_relieving | emergency_support | repayment_received | unclear",
+  "confidence": 0.0-1.0,
+  "one_line_reason": "<=15 words, what the money was for",
+  "evidence_quote": "the single most decisive chat line, verbatim",
+  "to_recover": true/false
+}
+3. If the chat does not justify a reason, return "unclear" with confidence < 0.4. Do NOT invent a reason that the messages do not support.`;
+
+loaders.figuring = async function () {
+  const days = parseInt($("#figDays").value || "5", 10);
+  const list = $("#figList");
+  list.innerHTML = '<p class="hint">Reading chat & pairing payments…</p>';
+  let data;
+  try { data = await api("/api/benazir/figuring?days=" + days); }
+  catch (e) { list.innerHTML = `<p class="hint">Failed: ${escapeHtml(e.message)}</p>`; return; }
+  STATE.figData = data;
+  const c = data.chat || {};
+  $("#figMeta").textContent =
+    `${data.count} payments · ${data.unresolved} still un-identified · chat ${c.messages || 0} msgs (${c.first || "?"} → ${c.last || "?"})`;
+  renderFiguring();
+  renderFigPrompt(days);
+};
+
+function renderFiguring() {
+  const data = STATE.figData || { items: [] };
+  const onlyUnres = $("#figUnresolvedOnly").checked;
+  const list = $("#figList");
+  const items = data.items.filter((it) => !onlyUnres || it.needs_reason);
+  if (!items.length) { list.innerHTML = '<p class="hint">Nothing to show — every payment in this view has a reason. Uncheck "Only un-identified" to see all.</p>'; return; }
+  list.innerHTML = "";
+  const days = (STATE.figData || {}).days || 5;
+  items.forEach((it) => list.appendChild(figCard(it, days)));
+}
+
+function relToPayment(msgDate, payDate) {
+  // Each chat date labelled clearly relative to the payment date.
+  const pd = (payDate || "").slice(0, 10);
+  const pms = Date.parse(pd + "T00:00:00");
+  const mms = Date.parse((msgDate || "").slice(0, 10) + "T00:00:00");
+  if (isNaN(pms) || isNaN(mms)) return { rel: "same", text: "" };
+  const off = Math.round((mms - pms) / 86400000);
+  const d = Math.abs(off), s = d === 1 ? "" : "s";
+  if (off < 0) return { rel: "back", text: `◀ BACKWARD · ${d} day${s} before payment` };
+  if (off > 0) return { rel: "fwd", text: `▶ FORWARD · ${d} day${s} after payment` };
+  return { rel: "same", text: "● SAME DAY AS PAYMENT" };
+}
+
+function figChatHtml(chat, payDate) {
+  if (!chat || !chat.length) return '<div class="chat-empty">No messages in this window.</div>';
+  let lastDate = "";
+  return chat.map((m) => {
+    let day = "";
+    if (m.date !== lastDate) {
+      lastDate = m.date;
+      const r = relToPayment(m.date, payDate);
+      day = `<div class="chat-day rel-${r.rel}"><span class="chat-date">${m.date}</span><span class="chat-rel rel-${r.rel}">${r.text}</span></div>`;
+    }
+    const who = m.is_me ? "me" : "her";
+    const cls = ["chat-line", who, m.amt_hit ? "amt-hit" : (m.money ? "money" : "")].join(" ").trim();
+    const flag = m.amt_hit ? ' <span class="chat-amt-key">✦ amount</span>' : "";
+    return `${day}<div class="${cls}"><span class="chat-t">${m.time}</span><span class="chat-who">${m.is_me ? "ME" : "BENAZIR"}</span><span class="chat-msg">${escapeHtml(m.msg)}${flag}</span></div>`;
+  }).join("");
+}
+
+function figCard(it, days) {
+  const div = document.createElement("div");
+  div.className = "fig-card section";
+  const dirCls = it.direction === "RECEIVED" ? "cell-pos" : "cell-neg";
+  const ref = it.bank_ref || it.paytm_ref || "—";
+  const badge = it.needs_reason ? '<span class="badge warn">needs reason</span>' : '<span class="badge ok">' + escapeHtml(it.note || "set") + '</span>';
+  const d = days || 5;
+  div.innerHTML = `
+    <div class="fig-head">
+      <div class="fig-amt"><span class="${dirCls}">${fmtINR(it.amount)}</span> <span class="muted">${it.direction === "RECEIVED" ? "received" : "paid"}</span></div>
+      <div class="fig-when"><b>${it.transaction_date || ""}</b> <span class="muted">· ${escapeHtml(it.source_bank || "")}</span></div>
+      <div class="fig-sig muted">${it.amount_hits} amount-hit · ${it.money_count} money lines · ±${d}d</div>
+      <div class="fig-status">${badge}</div>
+    </div>
+    <div class="fig-ref muted" title="${escapeHtml(ref)}">${escapeHtml(ref)}</div>
+    <div class="fig-body">
+      <div class="fig-chatwrap">
+        <div class="fig-window">
+          <span class="muted">Window for this payment: ±</span>
+          <input class="input fig-days" type="number" min="1" max="60" value="${d}" />
+          <span class="muted">days</span>
+          <button class="btn ghost xs fig-apply">Apply</button>
+          <span class="fig-windowstatus muted"></span>
+        </div>
+        <div class="fig-chat">${figChatHtml(it.chat, it.transaction_date)}</div>
+      </div>
+      <div class="fig-actions">
+        <input class="input fig-reason" placeholder="Reason for this payment…" value="${escapeHtml(it.needs_reason ? "" : (it.note || ""))}" />
+        <select class="input fig-cat"></select>
+        <button class="btn xs fig-save">Save reason</button>
+        <button class="btn ghost xs fig-copy">Copy for LLM</button>
+      </div>
+    </div>`;
+  // category dropdown
+  const sel = div.querySelector(".fig-cat");
+  sel.innerHTML = `<option value="">(keep category)</option>` + (STATE.meta.categories || []).map((c) => `<option>${c}</option>`).join("");
+  // per-payment window: widen/narrow ONLY this card's ±days
+  let curChat = it.chat;
+  const applyBtn = div.querySelector(".fig-apply");
+  const applyWindow = async () => {
+    const nd = Math.max(1, Math.min(parseInt(div.querySelector(".fig-days").value || "5", 10), 60));
+    applyBtn.textContent = "…"; applyBtn.disabled = true;
+    try {
+      const r = await api(`/api/benazir/chat-window?date=${encodeURIComponent(it.transaction_date)}&amount=${it.amount}&days=${nd}`);
+      curChat = r.chat;
+      div.querySelector(".fig-chat").innerHTML = figChatHtml(curChat, it.transaction_date);
+      div.querySelector(".fig-sig").textContent = `${r.amount_hits} amount-hit · ${r.money_count} money lines · ±${r.days}d`;
+      div.querySelector(".fig-windowstatus").textContent = `${curChat.length} msgs`;
+    } catch (e) { toast("Window failed: " + e.message, true); }
+    applyBtn.textContent = "Apply"; applyBtn.disabled = false;
+  };
+  applyBtn.addEventListener("click", applyWindow);
+  div.querySelector(".fig-days").addEventListener("keydown", (e) => { if (e.key === "Enter") applyWindow(); });
+  // save
+  div.querySelector(".fig-save").addEventListener("click", async () => {
+    const reason = div.querySelector(".fig-reason").value.trim();
+    const cat = sel.value;
+    const fields = { manual_person: "benazir" };
+    if (reason) fields.manual_comment = reason;
+    if (cat) fields.category = cat;
+    try { await saveDecision(it.transaction_id, fields); toast("Saved ✓"); loaders.figuring(); }
+    catch (e) { toast("Save failed: " + e.message, true); }
+  });
+  // copy single payment + chat as a ready LLM prompt (uses the current window)
+  div.querySelector(".fig-copy").addEventListener("click", () => {
+    const nd = parseInt(div.querySelector(".fig-days").value || d, 10);
+    const txt = fillPrompt(it, nd, curChat);
+    navigator.clipboard.writeText(txt).then(() => toast("Copied prompt for this payment"), () => toast("Copy failed", true));
+  });
+  return div;
+}
+
+function fillPrompt(it, days, chatOverride) {
+  const chat = (chatOverride || it.chat || []).map((m) => `[${m.date} ${m.time}] ${m.is_me ? "ME" : "BENAZIR"}: ${m.msg}`).join("\n");
+  return FIG_LLM_PROMPT
+    .replace("{{DATE}}", it.transaction_date || "")
+    .replace("{{AMOUNT}}", Math.round(it.amount || 0).toLocaleString("en-IN"))
+    .replace("{{DIRECTION}}", it.direction || "")
+    .replace("{{REF}}", it.bank_ref || it.paytm_ref || "—")
+    .replace("{{DAYS}}", days)
+    .replace("{{CHAT}}", chat || "(no messages)");
+}
+
+function renderFigPrompt(days) {
+  const tmpl = FIG_LLM_PROMPT.replace("{{DAYS}}", days);
+  $("#figPromptPanel").innerHTML = `
+    <h3>🤖 LLM prompt — auto-detect what each payment was for</h3>
+    <p class="hint">Feed this to any LLM (one payment at a time — or use each card's <b>Copy for LLM</b>). It returns strict JSON with a category, confidence, and the decisive chat quote. The placeholders <code>{{DATE}}</code>, <code>{{AMOUNT}}</code>, <code>{{DIRECTION}}</code>, <code>{{REF}}</code>, <code>{{CHAT}}</code> get filled per payment.</p>
+    <pre id="figPromptText" class="prompt-box">${escapeHtml(tmpl)}</pre>
+    <button class="btn" id="figPromptCopy">Copy prompt template</button>`;
+  $("#figPromptCopy").addEventListener("click", () => {
+    navigator.clipboard.writeText(tmpl).then(() => toast("Prompt template copied"), () => toast("Copy failed", true));
   });
 }
 
@@ -469,6 +669,9 @@ async function init() {
   // Enter key in any search field triggers the search.
   ["sQ", "sMin", "sMax", "sFrom", "sTo"].forEach((id) =>
     $("#" + id).addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); }));
+  $("#figReload").addEventListener("click", loaders.figuring);
+  $("#figDays").addEventListener("keydown", (e) => { if (e.key === "Enter") loaders.figuring(); });
+  $("#figUnresolvedOnly").addEventListener("change", renderFiguring);
   $("#largeApply").addEventListener("click", loaders.large);
   $("#largeSave").addEventListener("click", async () => { await api("/api/threshold", { method: "POST", body: JSON.stringify({ value: parseFloat($("#largeThreshold").value) }) }); toast("Threshold saved"); loaders.large(); });
 
