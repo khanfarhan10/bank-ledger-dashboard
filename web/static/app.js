@@ -315,7 +315,24 @@ loaders.figuring = async function () {
   renderFigPrompt(days);
 };
 
+// Lazy-load each card's chat only when it scrolls near the viewport — the page
+// has ~90 payments in a very chatty thread, so mounting every chat at once
+// froze the page (100k+ DOM nodes). One card's window loads on demand.
+let figObserver = null;
+function figObserveCard(card) {
+  if (!("IntersectionObserver" in window)) { card._figLoad && card._figLoad(); return; }
+  if (!figObserver) {
+    figObserver = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting && e.target._figLoad) { e.target._figLoad(); figObserver.unobserve(e.target); }
+      });
+    }, { rootMargin: "400px 0px" });
+  }
+  figObserver.observe(card);
+}
+
 function renderFiguring() {
+  if (figObserver) figObserver.disconnect();
   const data = STATE.figData || { items: [] };
   const onlyUnres = $("#figUnresolvedOnly").checked;
   const list = $("#figList");
@@ -339,20 +356,41 @@ function relToPayment(msgDate, payDate) {
   return { rel: "same", text: "● SAME DAY AS PAYMENT" };
 }
 
-function figChatHtml(chat, payDate) {
-  if (!chat || !chat.length) return '<div class="chat-empty">No messages in this window.</div>';
-  let lastDate = "";
-  return chat.map((m) => {
-    let day = "";
-    if (m.date !== lastDate) {
-      lastDate = m.date;
-      const r = relToPayment(m.date, payDate);
-      day = `<div class="chat-day rel-${r.rel}"><span class="chat-date">${m.date}</span><span class="chat-rel rel-${r.rel}">${r.text}</span></div>`;
+function offsetIsoDate(isoDate, offsetDays) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec((isoDate || "").slice(0, 10));
+  if (!match) return "";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + offsetDays));
+  return date.toISOString().slice(0, 10);
+}
+
+function figChatHtml(chat, payDate, days) {
+  const grouped = new Map();
+  (chat || []).forEach((message) => {
+    if (!grouped.has(message.date)) grouped.set(message.date, []);
+    grouped.get(message.date).push(message);
+  });
+
+  const windowDays = Math.max(1, Math.min(parseInt(days || "5", 10), 60));
+  const windowDates = [];
+  for (let offset = -windowDays; offset <= windowDays; offset += 1) {
+    const date = offsetIsoDate(payDate, offset);
+    if (date) windowDates.push(date);
+  }
+  if (!windowDates.length) windowDates.push(...grouped.keys());
+
+  return windowDates.map((date) => {
+    const r = relToPayment(date, payDate);
+    const day = `<div class="chat-day rel-${r.rel}"><span class="chat-date">${date}</span><span class="chat-rel rel-${r.rel}">${r.text}</span></div>`;
+    const messages = grouped.get(date) || [];
+    if (!messages.length) {
+      return `${day}<div class="chat-date-empty">No messages found for ${date}.</div>`;
     }
-    const who = m.is_me ? "me" : "her";
-    const cls = ["chat-line", who, m.amt_hit ? "amt-hit" : (m.money ? "money" : "")].join(" ").trim();
-    const flag = m.amt_hit ? ' <span class="chat-amt-key">✦ amount</span>' : "";
-    return `${day}<div class="${cls}"><span class="chat-t">${m.time}</span><span class="chat-who">${m.is_me ? "ME" : "BENAZIR"}</span><span class="chat-msg">${escapeHtml(m.msg)}${flag}</span></div>`;
+    return day + messages.map((m) => {
+      const who = m.is_me ? "me" : "her";
+      const cls = ["chat-line", who, m.amt_hit ? "amt-hit" : (m.money ? "money" : "")].join(" ").trim();
+      const flag = m.amt_hit ? ' <span class="chat-amt-key">✦ amount</span>' : "";
+      return `<div class="${cls}"><span class="chat-t">${m.time}</span><span class="chat-who">${m.is_me ? "ME" : "BENAZIR"}</span><span class="chat-msg">${escapeHtml(m.msg)}${flag}</span></div>`;
+    }).join("");
   }).join("");
 }
 
@@ -380,7 +418,7 @@ function figCard(it, days) {
           <button class="btn ghost xs fig-apply">Apply</button>
           <span class="fig-windowstatus muted"></span>
         </div>
-        <div class="fig-chat">${figChatHtml(it.chat, it.transaction_date)}</div>
+        <div class="fig-chat"><div class="chat-empty">Loading chat…</div></div>
       </div>
       <div class="fig-actions">
         <input class="input fig-reason" placeholder="Reason for this payment…" value="${escapeHtml(it.needs_reason ? "" : (it.note || ""))}" />
@@ -392,23 +430,31 @@ function figCard(it, days) {
   // category dropdown
   const sel = div.querySelector(".fig-cat");
   sel.innerHTML = `<option value="">(keep category)</option>` + (STATE.meta.categories || []).map((c) => `<option>${c}</option>`).join("");
-  // per-payment window: widen/narrow ONLY this card's ±days
-  let curChat = it.chat;
+  // per-payment window: lazy-loaded on first view, re-loadable for a custom ±days
+  let curChat = [];
+  let loadedDays = 0;
   const applyBtn = div.querySelector(".fig-apply");
-  const applyWindow = async () => {
-    const nd = Math.max(1, Math.min(parseInt(div.querySelector(".fig-days").value || "5", 10), 60));
-    applyBtn.textContent = "…"; applyBtn.disabled = true;
+  const chatBox = div.querySelector(".fig-chat");
+  const curDays = () => Math.max(1, Math.min(parseInt(div.querySelector(".fig-days").value || d, 10), 60));
+  const loadChat = async (nd, force) => {
+    if (!force && loadedDays === nd) return;   // already loaded this window
+    applyBtn.disabled = true;
+    div.querySelector(".fig-windowstatus").textContent = "loading…";
     try {
       const r = await api(`/api/benazir/chat-window?date=${encodeURIComponent(it.transaction_date)}&amount=${it.amount}&days=${nd}`);
-      curChat = r.chat;
-      div.querySelector(".fig-chat").innerHTML = figChatHtml(curChat, it.transaction_date);
+      curChat = r.chat; loadedDays = nd;
+      chatBox.innerHTML = figChatHtml(curChat, it.transaction_date, nd);
       div.querySelector(".fig-sig").textContent = `${r.amount_hits} amount-hit · ${r.money_count} money lines · ±${r.days}d`;
       div.querySelector(".fig-windowstatus").textContent = `${curChat.length} msgs`;
-    } catch (e) { toast("Window failed: " + e.message, true); }
-    applyBtn.textContent = "Apply"; applyBtn.disabled = false;
+    } catch (e) {
+      div.querySelector(".fig-windowstatus").textContent = "load failed";
+      toast("Chat load failed: " + e.message, true);
+    }
+    applyBtn.disabled = false;
   };
-  applyBtn.addEventListener("click", applyWindow);
-  div.querySelector(".fig-days").addEventListener("keydown", (e) => { if (e.key === "Enter") applyWindow(); });
+  div._figLoad = () => loadChat(curDays(), false);   // called by the lazy observer
+  applyBtn.addEventListener("click", () => loadChat(curDays(), true));
+  div.querySelector(".fig-days").addEventListener("keydown", (e) => { if (e.key === "Enter") loadChat(curDays(), true); });
   // save
   div.querySelector(".fig-save").addEventListener("click", async () => {
     const reason = div.querySelector(".fig-reason").value.trim();
@@ -419,12 +465,14 @@ function figCard(it, days) {
     try { await saveDecision(it.transaction_id, fields); toast("Saved ✓"); loaders.figuring(); }
     catch (e) { toast("Save failed: " + e.message, true); }
   });
-  // copy single payment + chat as a ready LLM prompt (uses the current window)
-  div.querySelector(".fig-copy").addEventListener("click", () => {
-    const nd = parseInt(div.querySelector(".fig-days").value || d, 10);
+  // copy single payment + chat as a ready LLM prompt (loads the chat if needed)
+  div.querySelector(".fig-copy").addEventListener("click", async () => {
+    const nd = curDays();
+    if (!curChat.length) await loadChat(nd, true);
     const txt = fillPrompt(it, nd, curChat);
     navigator.clipboard.writeText(txt).then(() => toast("Copied prompt for this payment"), () => toast("Copy failed", true));
   });
+  figObserveCard(div);   // register for lazy chat load
   return div;
 }
 

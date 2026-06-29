@@ -241,8 +241,11 @@ def benazir_figuring(days: int = 5) -> dict:
         # Highest amount first (the payments most worth identifying).
         members.sort(key=lambda m: float(m.get("amount") or 0), reverse=True)
         for mem in members:
+            # Counts only — each card lazy-loads its own chat via /chat-window
+            # when scrolled into view (keeps this payload small).
             ctx = chat_context.context_for(
-                mem.get("transaction_date"), mem.get("amount"), days=days
+                mem.get("transaction_date"), mem.get("amount"), days=days,
+                include_messages=False,
             )
             note = mem.get("manual_comment")
             items.append({
@@ -260,7 +263,6 @@ def benazir_figuring(days: int = 5) -> dict:
                 "is_approved": bool(mem.get("is_approved")),
                 "money_count": ctx["money_count"],
                 "amount_hits": ctx["amount_hits"],
-                "chat": ctx["messages"],
             })
     return {
         "days": days, "count": len(items),

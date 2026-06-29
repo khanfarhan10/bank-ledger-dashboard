@@ -264,5 +264,6 @@ canvas { max-height: 240px; }
 .chat-amt-key { color: var(--amber); font-weight: 700; font-size: 10px; }
 .chat-money-key { color: var(--accent); font-weight: 600; }
 .chat-empty { color: var(--muted); font-size: 12px; padding: 8px; text-align: center; }
+.chat-date-empty { color: var(--muted); font-size: 11px; padding: 5px 8px 8px; font-style: italic; }
 .prompt-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; max-height: 360px; overflow-y: auto; color: var(--text); font-family: ui-monospace, "Cascadia Code", Consolas, monospace; margin-bottom: 10px; }
 @media (max-width: 900px) { .fig-body { grid-template-columns: 1fr; } .fig-head { grid-template-columns: 1fr 1fr; } }

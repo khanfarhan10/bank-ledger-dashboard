@@ -10,15 +10,16 @@ from __future__ import annotations
 
 import pickle
 import re
-from datetime import timedelta
+from bisect import bisect_left
+from datetime import datetime, time, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 CHAT_PATH = Path("data/benazir_chat_data/Full_WhatsApp_Chat_with_Benazir.txt")
 CACHE_PATH = Path("data/cache/chat_parsed.pkl")
+IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 
 # WhatsApp export line: "M/D/YY, H:MM AM/PM - Sender: message"
 _LINE = re.compile(
@@ -90,42 +91,49 @@ def load_chat() -> pd.DataFrame:
     return df
 
 
-@lru_cache(maxsize=1)
-def _chat_arrays():
-    """Presorted parallel arrays for fast window slicing via searchsorted.
+def _build_messages_by_ist_timestamp(df: pd.DataFrame) -> dict[datetime, list[dict]]:
+    """Build the complete in-memory chat index without collapsing duplicates."""
+    messages_by_ist_timestamp: dict[datetime, list[dict]] = {}
+    for k, (raw_ts, raw_sender, raw_msg) in enumerate(
+        df[["ts", "sender", "msg"]].itertuples(index=False, name=None)
+    ):
+        ts = pd.Timestamp(raw_ts)
+        ts = ts.tz_localize(IST) if ts.tzinfo is None else ts.tz_convert(IST)
+        ist_ts = ts.to_pydatetime()
+        sender = "" if pd.isna(raw_sender) else str(raw_sender).strip()
+        msg = "" if pd.isna(raw_msg) else str(raw_msg)
+        messages_by_ist_timestamp.setdefault(ist_ts, []).append({
+            "k": k,
+            "date": ist_ts.date().isoformat(),
+            "time": ist_ts.strftime("%H:%M"),
+            "sender": sender,
+            "is_me": sender.lower() in ("fhk", "farhan", "you", "me"),
+            "msg": msg,
+            "money": bool(_SIGNAL.search(msg)),
+        })
+    return messages_by_ist_timestamp
 
-    All per-message strings (date, time) are precomputed VECTORISED here once,
-    so the per-payment loop only indexes — no pd.Timestamp()/strftime() per
-    message (that made each request several seconds)."""
-    df = load_chat()
-    if df.empty:
-        empty = np.array([], dtype="datetime64[ns]")
-        return {"ts": empty, "senders": [], "msgs": [],
-                "is_me": np.array([], dtype=bool), "date": [], "time": [],
-                "money": np.array([], dtype=bool)}
-    senders = df["sender"].tolist()
-    return {
-        "ts": df["ts"].values.astype("datetime64[ns]"),
-        "senders": senders,
-        "msgs": df["msg"].tolist(),
-        "is_me": np.array([str(s).strip().lower() in ("fhk", "farhan", "you", "me")
-                           for s in senders], dtype=bool),
-        "date": df["ts"].dt.strftime("%Y-%m-%d").tolist(),
-        "time": df["ts"].dt.strftime("%H:%M").tolist(),
-        # money-signal flag precomputed VECTORISED once (one regex pass over the
-        # whole chat) so per-payment windows only index, never re-run the regex.
-        "money": df["msg"].str.contains(_SIGNAL, regex=True, na=False).to_numpy(),
-    }
+
+@lru_cache(maxsize=1)
+def _messages_by_ist_timestamp() -> dict[datetime, list[dict]]:
+    """Parse and index the chat once, then reuse it for every payment."""
+    return _build_messages_by_ist_timestamp(load_chat())
+
+
+@lru_cache(maxsize=1)
+def _sorted_ist_timestamps() -> tuple[datetime, ...]:
+    return tuple(sorted(_messages_by_ist_timestamp()))
 
 
 def chat_span() -> dict:
-    df = load_chat()
-    if df.empty:
+    messages_by_timestamp = _messages_by_ist_timestamp()
+    timestamps = _sorted_ist_timestamps()
+    if not timestamps:
         return {"messages": 0, "first": None, "last": None}
     return {
-        "messages": int(len(df)),
-        "first": df["ts"].min().date().isoformat(),
-        "last": df["ts"].max().date().isoformat(),
+        "messages": sum(len(messages) for messages in messages_by_timestamp.values()),
+        "first": timestamps[0].date().isoformat(),
+        "last": timestamps[-1].date().isoformat(),
     }
 
 
@@ -144,57 +152,44 @@ def _amount_variants(amount) -> list[str]:
     return [v for v in out if len(v) >= 2]
 
 
-def context_for(date, amount=None, days: int = 5, limit: int | None = None) -> dict:
+def context_for(date, amount=None, days: int = 5, include_messages: bool = True) -> dict:
     """Messages within +/- `days` of `date`, money-flagged and amount-flagged.
 
-    Returns {"messages": [...], "money_count": int, "amount_hits": int}.
-    The display cap scales with the window so widening the days actually shows
-    more messages (not the same truncated 60).
+    Returns every message in the complete IST calendar window. No relevance
+    filtering or display cap is applied. Pass include_messages=False to get just
+    the money/amount counts cheaply (the bulk page lazy-loads each chat on
+    demand, so it only needs counts up front).
     """
-    if limit is None:
-        limit = min(220, max(60, int(days) * 16))
-    arr = _chat_arrays()
-    ts = arr["ts"]
+    messages_by_timestamp = _messages_by_ist_timestamp()
+    timestamps = _sorted_ist_timestamps()
     try:
-        target = pd.Timestamp(date)
+        target_date = pd.Timestamp(date).date()
     except (TypeError, ValueError):
-        target = pd.NaT
-    if len(ts) == 0 or pd.isna(target):
+        target_date = None
+    if not timestamps or target_date is None:
         return {"messages": [], "money_count": 0, "amount_hits": 0}
-    lo = np.datetime64(target - timedelta(days=days))
-    hi = np.datetime64(target + timedelta(days=days) + timedelta(hours=23, minutes=59))
-    i = int(np.searchsorted(ts, lo, side="left"))
-    j = int(np.searchsorted(ts, hi, side="right"))
 
-    senders, msgs, is_me = arr["senders"], arr["msgs"], arr["is_me"]
-    dates, times, money = arr["date"], arr["time"], arr["money"]
+    window_days = max(0, int(days))
+    lo = datetime.combine(target_date - timedelta(days=window_days), time.min, IST)
+    hi = datetime.combine(target_date + timedelta(days=window_days + 1), time.min, IST)
+    i = bisect_left(timestamps, lo)
+    j = bisect_left(timestamps, hi)
+
     exact = _amount_variants(amount) if amount is not None else []
     exact_strong = exact[:2]  # the full-number forms are the strong matches
 
     out, money_count, amount_hits = [], 0, 0
-    for k in range(i, j):
-        msg = msgs[k]
-        if not msg or msg in _MEDIA:
-            continue
-        is_money = bool(money[k])
-        amt_hit = any(v in msg for v in exact_strong)
-        if is_money:
-            money_count += 1
-        if amt_hit:
-            amount_hits += 1
-        out.append({
-            "k": k,
-            "date": dates[k],
-            "time": times[k],
-            "sender": senders[k],
-            "is_me": bool(is_me[k]),
-            "msg": msg if len(msg) <= 400 else msg[:400] + "…",
-            "money": is_money,
-            "amt_hit": amt_hit,
-        })
-    # Prefer to keep money/amount-bearing lines if we have to truncate.
-    if len(out) > limit:
-        out.sort(key=lambda m: (not m["amt_hit"], not m["money"], m["k"]))
-        out = out[:limit]
-        out.sort(key=lambda m: m["k"])
+    for timestamp in timestamps[i:j]:
+        for message in messages_by_timestamp[timestamp]:
+            msg = message["msg"]
+            if not msg or msg in _MEDIA:
+                continue
+            amt_hit = any(variant in msg for variant in exact_strong)
+            if message["money"]:
+                money_count += 1
+            if amt_hit:
+                amount_hits += 1
+            if include_messages:
+                out.append({**message, "amt_hit": amt_hit})
+
     return {"messages": out, "money_count": money_count, "amount_hits": amount_hits}
